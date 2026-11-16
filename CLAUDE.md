@@ -84,6 +84,12 @@ assets/icon.png          1024px app icon (Skelpo S on orange)
 
 ## Known Perry gaps
 
+Upstream PR with the UI/codegen fixes below: https://github.com/PerryTS/perry/pull/14799
+(fetch hang, iOS stack alignment, Image lowering, image cache, alerts,
+TextArea, notification prompt, matchParentWidth, device-build CPU). Not in
+it: the iOS shape-table capacity change, which only patches an uncommitted
+local change in the worktree, and the simulator keychain entitlement.
+
 - **UI apps never turned the network loop (fixed locally, not upstream yet).**
   Since the tokio removal, `fetch` completes on turnloop NET completions that
   only a loop turn collects. CLI programs turn it in `js_wait_for_event`; the
