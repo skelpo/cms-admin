@@ -1,0 +1,62 @@
+# Perry project config for Skelpo CMS Admin.
+#
+# One TypeScript source (client/main.ts) → iOS, Android, macOS, Linux, Windows.
+# `perry run ios` / `perry publish ios` read this file. Signing material and
+# App Store Connect API credentials come from ~/.perry/config.toml (set up with
+# `perry setup ios`), so nothing secret lives in this repo.
+
+[project]
+name = "skelpo-cms-admin"
+entry = "client/main.ts"
+version = "0.2.0"
+build_number = 1
+bundle_id = "com.skelpo.cmsadmin"
+description = "Edit and publish your Skelpo CMS website from your phone."
+
+[project.icons]
+source = "assets/icon.png"
+
+[build]
+out_dir = "dist"
+
+[ios]
+bundle_id = "com.skelpo.cmsadmin"
+deployment_target = "17.0"
+device_family = ["iphone", "ipad"]
+orientations = ["portrait", "landscape-left", "landscape-right"]
+distribute = "testflight"
+encryption_exempt = true
+signing_identity = "Apple Distribution: Skelpo GmbH (K6UW5YV9F7)"
+certificate = "/Users/amlug/.perry/distribution.p12"
+
+# [ios.info_plist] must come after every scalar [ios] key (TOML folds later
+# scalars into the sub-table).
+[ios.info_plist]
+CFBundleDisplayName = "Skelpo CMS"
+
+[android]
+package_name = "com.skelpo.cmsadmin"
+min_sdk = "26"
+permissions = ["INTERNET"]
+distribute = "playstore"
+
+[macos]
+bundle_id = "com.skelpo.cmsadmin"
+category = "public.app-category.productivity"
+minimum_os = "13.0"
+distribute = "both"
+encryption_exempt = true
+entitlements = [
+    "com.apple.security.app-sandbox",
+    "com.apple.security.network.client",
+    "com.apple.security.files.user-selected.read-only",
+]
+signing_identity = "3rd Party Mac Developer Application: Skelpo GmbH (K6UW5YV9F7)"
+notarize_signing_identity = "Developer ID Application: Skelpo GmbH (K6UW5YV9F7)"
+
+[linux]
+format = "appimage"
+category = "Office"
+
+[publish]
+exclude = [".git", ".claude", "build", "dist", "node_modules", ".perry-cache", "*.o", "*.app"]
