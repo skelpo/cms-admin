@@ -12,7 +12,7 @@ BUNDLE_ID := com.skelpo.cmsadmin
 # Pinned to the local Perry worktree that carries the fixes listed in
 # CLAUDE.md ("Known Perry gaps"); a stock `perry` on PATH builds an app whose
 # requests hang. Override with `make PERRY_WT=/path/to/target/release`.
-PERRY_WT ?= $(abspath ../perry/worktrees/perry-latest/target/release)
+PERRY_WT ?= $(abspath ../perry/worktrees/ui-ios-fixes/target/release)
 PERRY := PERRY_RUNTIME_DIR=$(PERRY_WT) $(PERRY_WT)/perry
 # PERRY_RUNTIME_DIR is searched before the per-target dirs, so cross builds
 # point it at that target's archives (else the macOS ones get linked).
@@ -28,7 +28,7 @@ PERRY_DEV := $(IOS_CPU) PERRY_RUNTIME_DIR=$(PERRY_WT)/../aarch64-apple-ios/relea
 # keychain prompt, which blocks the app). Use MAC_SIGN=- for ad-hoc.
 MAC_SIGN ?= Developer ID Application: Skelpo GmbH (K6UW5YV9F7)
 
-.PHONY: all check mac run run-ui sim sim-install device device-build clean
+.PHONY: all check mac run run-ui sim sim-install device device-build ipa testflight asc-status clean
 
 all: mac
 
@@ -74,6 +74,18 @@ device:
 device-build:
 	mkdir -p build
 	$(PERRY_DEV) compile client/main.ts --target ios --app-bundle-id $(BUNDLE_ID) -o build/client-device
+
+# TestFlight: compile for device, add icon + privacy manifest, sign with the
+# App Store profile, validate and upload (scripts/testflight.sh).
+# Build number = last uploaded + 1 (scripts/asc.py next-build).
+ipa:
+	PERRY_WT=$(PERRY_WT) scripts/testflight.sh --no-upload
+
+testflight:
+	PERRY_WT=$(PERRY_WT) scripts/testflight.sh
+
+asc-status:
+	python3 scripts/asc.py status
 
 clean:
 	rm -rf build dist .perry-cache node_modules/.cache/perry

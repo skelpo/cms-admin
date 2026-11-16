@@ -12,8 +12,8 @@ skelpo.com (`../skelpo.com/vercel`) sites.
 
 ## Stack
 
-- **Compiler:** Perry (local worktree `../perry/worktrees/perry-latest`,
-  0.5.1664 + the UI pump patch below). Config: `perry.toml`.
+- **Compiler:** Perry (local worktree `../perry/worktrees/ui-ios-fixes`,
+  the PerryTS/perry#14799 branch). Config: `perry.toml`.
 - **Targets:** iOS first; macOS for local testing; Android/Linux/Windows build
   from the same source.
 
@@ -161,6 +161,9 @@ make run                       # macOS app
 make run-ui                    # macOS + geisterhand UI driver on :7676
 make sim-install               # iOS simulator
 make device                    # connected iPhone (perry setup ios --development first)
+make testflight                # build, sign, validate, upload to TestFlight (build no. = last + 1)
+make ipa                       # same, stop at build/release/SkelpoCMS.ipa
+make asc-status                # bundle ID, App Store profile, app record, recent builds
 ```
 
 Simulator automation (no UI driver on iOS): set user defaults, then launch —
@@ -170,6 +173,22 @@ http://127.0.0.1:3137` (+ `_EMAIL`, `_PASSWORD`, `_TAB` 0–4, `_TYPE` slug,
 
 Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
 `../verrano/CLAUDE.md` for credentials). On a phone the server must be https.
+
+## TestFlight / App Store
+
+- App Store Connect app "Skelpo CMS" (id 6835516180), bundle ID
+  `com.skelpo.cmsadmin`, team K6UW5YV9F7. API key + profile live in
+  `~/.perry/` (`scripts/asc.py` reads `~/.perry/config.toml [apple]`).
+- `scripts/testflight.sh` packages locally because Perry Hub's Perry lacks
+  #14799. It post-processes Perry's bundle: actool icon (Assets.car), privacy
+  manifest (`assets/ios/PrivacyInfo.xcprivacy`), CFBundleName, build number,
+  drops Perry's template camera/mic usage strings (another app's wording),
+  iPhone portrait only, then signs with Apple Distribution + the App Store
+  profile and uploads with `altool --apiKey`.
+- The Perry compiler must link LLVM 22 (`LLVM_SYS_221_PREFIX=/opt/homebrew/opt/llvm@22`);
+  Homebrew's `llvm` is 23, which rejects Perry's iOS `Os` level.
+- The Makefile now points at the `ui-ios-fixes` worktree (the #14799 branch);
+  only macOS and aarch64-apple-ios archives are built there (no simulator yet).
 
 ## Adding an endpoint
 
