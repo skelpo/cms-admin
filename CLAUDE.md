@@ -146,8 +146,9 @@ local change in the worktree, and the simulator keychain entitlement.
 - Simulator builds have no keychain entitlement (Perry doesn't embed the
   simulator `__entitlements` section), so sign-ins don't persist across
   launches in the simulator. Device builds get it from the provisioning profile.
-- Rich-text fields use `@skelpo/markdown-editor` (`../skelpo-markdown-editor`,
-  linked via `file:`): a native UITextView/NSTextView with live Markdown
+- Rich-text fields use `@skelpo/markdown-editor` (npm; source in
+  `../skelpo-markdown-editor`, github.com/skelpo/markdown-editor; releases
+  by `v<version>` tag → release.yml with npm Trusted Publisher): a native UITextView/NSTextView with live Markdown
   styling. Phone: the field is a preview card that opens the full-screen
   Write screen (`R_WRITE`, drawn in `writePane` instead of the shared
   ScrollView). Desktop: inline editor under a formatting bar. One editor per

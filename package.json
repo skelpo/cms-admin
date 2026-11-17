@@ -2,7 +2,7 @@
   "name": "skelpo-cms-admin",
   "version": "0.2.0",
   "private": true,
-  "description": "Skelpo CMS Admin \u2014 native cross-platform admin client (Perry/ui) for a Skelpo CMS backend.",
+  "description": "Skelpo CMS Admin — native cross-platform admin client (Perry/ui) for a Skelpo CMS backend.",
   "license": "UNLICENSED",
   "main": "client/main.ts",
   "scripts": {
@@ -14,7 +14,7 @@
     "@types/node": "^22.0.0"
   },
   "dependencies": {
-    "@skelpo/markdown-editor": "file:../skelpo-markdown-editor"
+    "@skelpo/markdown-editor": "^0.1.0"
   },
   "perry": {
     "allow": {
