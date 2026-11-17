@@ -8,7 +8,7 @@
 [project]
 name = "skelpo-cms-admin"
 entry = "client/main.ts"
-version = "0.2.0"
+version = "1.0"
 build_number = 1
 bundle_id = "com.skelpo.cmsadmin"
 description = "Edit and publish your Skelpo CMS website from your phone."
@@ -22,7 +22,7 @@ out_dir = "dist"
 [ios]
 bundle_id = "com.skelpo.cmsadmin"
 deployment_target = "17.0"
-device_family = ["iphone", "ipad"]
+device_family = ["iphone"]
 orientations = ["portrait", "landscape-left", "landscape-right"]
 distribute = "testflight"
 encryption_exempt = true

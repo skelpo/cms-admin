@@ -1,6 +1,9 @@
 // The CMS returns errors as `{ error: { code, message, details? } }`. This
 // mirrors that envelope and gives the client a single typed error to throw.
 
+// UI language lives in the client; errors are shown there.
+import { tr } from "../../client/i18n.js";
+
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: Record<string, unknown> };
 }
@@ -37,11 +40,11 @@ export function toApiError(status: number, rawBody: string): ApiError {
     // not JSON — never show raw HTML to the user
   }
   if (message.length === 0) {
-    if (status === 404) message = "Not found on this server. Check the server address.";
-    else if (status === 401) message = "You're signed out. Sign in again.";
-    else if (status === 403) message = "Your role isn't allowed to do this.";
-    else if (status >= 500) message = `The server had a problem (HTTP ${status}).`;
-    else message = `Request failed (HTTP ${status}).`;
+    if (status === 404) message = tr("Not found on this server. Check the server address.");
+    else if (status === 401) message = tr("You're signed out. Sign in again.");
+    else if (status === 403) message = tr("Your role isn't allowed to do this.");
+    else if (status >= 500) message = tr("The server had a problem (HTTP {status}).", { status });
+    else message = tr("Request failed (HTTP {status}).", { status });
   }
   return new ApiError(status, code, message, details);
 }
@@ -61,18 +64,18 @@ export function errorMessage(e: unknown): string {
         for (let i = 0; i < errs.length; i++) {
           const one = errs[i] as { field?: string; message?: string; constraint?: string } | null;
           if (!one) continue;
-          const what = one.message ?? one.constraint ?? "invalid";
+          const what = one.message ?? one.constraint ?? tr("invalid");
           lines.push(one.field ? `${one.field}: ${what}` : what);
         }
         if (lines.length > 0) return `${e.message}\n${lines.join("\n")}`;
       }
       const retry = d["retryAfterS"];
       if (typeof retry === "number") {
-        return `${e.message} Try again in ${Math.ceil(retry / 60)} min.`;
+        return tr("{message} Try again in {n} min.", { message: e.message, n: Math.ceil(retry / 60) });
       }
     }
     return e.message;
   }
   if (e instanceof Error) return e.message;
-  return "Something went wrong.";
+  return tr("Something went wrong.");
 }

@@ -32,11 +32,14 @@ PERRY_DEV := $(IOS_CPU) PERRY_RUNTIME_DIR=$(PERRY_WT)/../aarch64-apple-ios/relea
 # keychain prompt, which blocks the app). Use MAC_SIGN=- for ad-hoc.
 MAC_SIGN ?= Developer ID Application: Skelpo GmbH (K6UW5YV9F7)
 
-.PHONY: all check mac run run-ui sim sim-install device device-build ipa testflight asc-status clean
+.PHONY: all i18n shots check mac run run-ui sim sim-install device device-build ipa testflight asc-status clean
 
 all: mac
 
-check:
+i18n:
+	python3 scripts/i18n-check.py
+
+check: i18n
 	$(PERRY) check client/main.ts
 
 # macOS app bundle (build/client.app) + bare binary (build/client).
@@ -60,6 +63,7 @@ run-ui:
 sim:
 	mkdir -p build
 	$(PERRY_SIM) compile client/main.ts --target ios-simulator --app-bundle-id $(BUNDLE_ID) -o build/client-ios
+	scripts/ios-localize.sh build/client-ios.app
 
 sim-install: sim
 	xcrun simctl boot "$(SIM)" 2>/dev/null || true

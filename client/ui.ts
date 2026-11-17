@@ -53,6 +53,7 @@ import {
 } from "perry/ui";
 import type { Widget } from "perry/ui";
 import { hapticPlay, isDarkMode } from "perry/system";
+import { tr } from "./i18n.js";
 
 /** Compile-time platform id: 0 macOS, 1 iOS, 2 Android, 3 Windows, 4 Linux. */
 declare const __platform__: number;
@@ -467,7 +468,7 @@ export function item(
   setPadding(r, 12, 16, 12, 14);
   if (lead) put(r, lead);
   const texts = column(2);
-  put(texts, text(title.length > 0 ? title : "Untitled", 16, 500, INK, 2));
+  put(texts, text(title.length > 0 ? title : tr("Untitled"), 16, 500, INK, 2));
   if (subtitle.length > 0) put(texts, text(subtitle, 13, 400, MUTED, 2));
   put(r, grow(texts));
   if (trailing) put(r, trailing);

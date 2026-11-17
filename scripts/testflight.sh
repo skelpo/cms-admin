@@ -58,7 +58,7 @@ cat > "$XC/Contents.json" <<'JSON'
 JSON
 echo '{ "info": { "author": "xcode", "version": 1 } }' > "$OUT/icon.xcassets/Contents.json"
 xcrun actool "$OUT/icon.xcassets" --compile "$APP" --platform iphoneos \
-  --minimum-deployment-target 17.0 --target-device iphone --target-device ipad \
+  --minimum-deployment-target 17.0 --target-device iphone \
   --app-icon AppIcon --output-partial-info-plist "$OUT/icon-partial.plist" \
   --errors --warnings >/dev/null
 
@@ -75,7 +75,13 @@ $PB -c "Delete :NSMicrophoneUsageDescription" "$P" 2>/dev/null || true
 $PB -c "Delete :UISupportedInterfaceOrientations" "$P" 2>/dev/null || true
 $PB -c "Add :UISupportedInterfaceOrientations array" \
     -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$P"
+# iPhone only for 1.0: the layout is phone-first, and iPad support can't be
+# withdrawn once a version ships (it can be added later).
+$PB -c "Delete :UIDeviceFamily" -c "Add :UIDeviceFamily array" -c "Add :UIDeviceFamily:0 integer 1" "$P"
+$PB -c "Delete :UISupportedInterfaceOrientations~ipad" "$P" 2>/dev/null || true
+$PB -c "Delete :CFBundleIcons~ipad" "$P" 2>/dev/null || true
 cp assets/ios/PrivacyInfo.xcprivacy "$APP/"
+scripts/ios-localize.sh "$APP"
 plutil -lint "$P" >/dev/null
 
 echo "==> sign"

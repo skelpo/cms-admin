@@ -31,6 +31,7 @@ import type {
   Webhook,
   WebhookDelivery,
 } from "../shared/domain/index.js";
+import { tr } from "./i18n.js";
 
 // ---------- connection state --------------------------------------------
 
@@ -97,7 +98,7 @@ async function send(url: string, init: Record<string, unknown>): Promise<{ statu
     r = await fetch(url, init as never);
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
-    throw new ApiError(0, "network", `Can't reach the server (${why}).`);
+    throw new ApiError(0, "network", tr("Can't reach the server ({why}).", { why }));
   }
   const text = await r.text();
   if (!r.ok) throw toApiError(r.status, text);
@@ -110,7 +111,7 @@ function parseJson<T>(text: string): T {
   } catch {
     // An HTML page here almost always means the URL points at a website
     // whose proxy doesn't forward /api/v1 to the CMS.
-    throw new ApiError(0, "notCms", "The server answered, but not with CMS data. Check the server address.");
+    throw new ApiError(0, "notCms", tr("The server answered, but not with CMS data. Check the server address."));
   }
 }
 
@@ -131,7 +132,7 @@ async function request<T>(method: string, path: string, opts?: ReqOpts): Promise
 async function reqData<T>(method: string, path: string, opts?: ReqOpts): Promise<T> {
   const parsed = await request<{ data: T }>(method, path, opts);
   if (!parsed || typeof parsed !== "object" || !("data" in parsed)) {
-    throw new ApiError(0, "notCms", "Unexpected response from the server.");
+    throw new ApiError(0, "notCms", tr("Unexpected response from the server."));
   }
   return parsed.data;
 }
@@ -145,7 +146,7 @@ async function reqData<T>(method: string, path: string, opts?: ReqOpts): Promise
 export async function probeServer(): Promise<void> {
   const types = await reqData<unknown>("GET", "/types");
   if (!Array.isArray(types)) {
-    throw new ApiError(0, "notCms", "This server doesn't look like a Skelpo CMS.");
+    throw new ApiError(0, "notCms", tr("This server doesn't look like a Skelpo CMS."));
   }
 }
 
@@ -234,7 +235,7 @@ export async function listContent(params: ListContentParams): Promise<ContentPag
     },
   });
   if (!page || !Array.isArray(page.data)) {
-    throw new ApiError(0, "notCms", "Unexpected response from the server.");
+    throw new ApiError(0, "notCms", tr("Unexpected response from the server."));
   }
   return page;
 }
@@ -427,11 +428,11 @@ export async function uploadMedia(path: string, filename: string, altText: Recor
   try {
     bytes = new Uint8Array(fs.readFileSync(path));
   } catch {
-    throw new ApiError(0, "fileRead", "Couldn't read the selected file.");
+    throw new ApiError(0, "fileRead", tr("Couldn't read the selected file."));
   }
-  if (bytes.length === 0) throw new ApiError(0, "fileRead", "The selected file is empty.");
+  if (bytes.length === 0) throw new ApiError(0, "fileRead", tr("The selected file is empty."));
   if (bytes.length > MAX_UPLOAD_BYTES) {
-    throw new ApiError(413, "contentTooLarge", "This file is larger than the 25 MB upload limit.");
+    throw new ApiError(413, "contentTooLarge", tr("This file is larger than the 25 MB upload limit."));
   }
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: mimeForFilename(filename) }), filename);

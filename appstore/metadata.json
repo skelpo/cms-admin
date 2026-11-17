@@ -1,0 +1,54 @@
+{
+  "_comment": "App Store listing for Skelpo CMS (iOS). Pushed by `python3 scripts/asc.py metadata`. Limits: name/subtitle 30 chars, promotionalText 170, keywords 100 bytes, description 4000.",
+  "copyright": "2026 Skelpo GmbH",
+  "primaryCategory": "PRODUCTIVITY",
+  "secondaryCategory": "BUSINESS",
+  "ageRating": {
+    "advertising": false,
+    "ageAssurance": false,
+    "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+    "contests": "NONE",
+    "gambling": false,
+    "gamblingSimulated": "NONE",
+    "gunsOrOtherWeapons": "NONE",
+    "healthOrWellnessTopics": false,
+    "horrorOrFearThemes": "NONE",
+    "lootBox": false,
+    "matureOrSuggestiveThemes": "NONE",
+    "medicalOrTreatmentInformation": "NONE",
+    "messagingAndChat": false,
+    "parentalControls": false,
+    "profanityOrCrudeHumor": "NONE",
+    "sexualContentGraphicAndNudity": "NONE",
+    "sexualContentOrNudity": "NONE",
+    "socialMedia": false,
+    "unrestrictedWebAccess": false,
+    "userGeneratedContent": false,
+    "violenceCartoonOrFantasy": "NONE",
+    "violenceRealistic": "NONE",
+    "violenceRealisticProlongedGraphicOrSadistic": "NONE"
+  },
+  "reviewNotes": "Skelpo CMS is a client for websites that run on Skelpo CMS, a content management system made by Skelpo GmbH. It has no accounts of its own: users sign in to their own website with the credentials the site's administrator gave them. Account creation and deletion happen on the website, not in the app.\n\nTo review: enter the website address, email and password from the demo account fields on the sign-in screen. The demo site is a test website; feel free to create, edit, publish and delete content.\n\nThe app collects no data. It talks only to the website the user signs in to, and stores that site's session token in the iOS keychain.",
+  "locales": {
+    "en-US": {
+      "name": "Skelpo CMS",
+      "subtitle": "Edit your website on the go",
+      "privacyPolicyUrl": "https://www.skelpo.com/en/privacy",
+      "supportUrl": "https://www.skelpo.com/en/contact",
+      "marketingUrl": "https://www.skelpo.com/en/cms",
+      "promotionalText": "Publish pages, swap photos and answer form messages from your phone. Works with every website that runs Skelpo CMS.",
+      "keywords": "cms,website,editor,blog,publish,content,pages,media,seo,markdown,admin,webmaster,homepage",
+      "description": "Your website in your pocket. Skelpo CMS is the companion app for websites built on Skelpo CMS. Fix a typo, publish a news post, swap a photo or answer an enquiry, without opening a laptop.\n\nHOME\nSee at a glance what needs you: drafts waiting to go live, items in review, new messages this week and background jobs that failed. Jump straight back into the page you were editing.\n\nCONTENT\nEvery content type of your site in one place: pages, blog posts, products, recipes, team members, FAQs and whatever else your site is made of. Filter by status and language, search, and create new drafts.\n\nEDITOR\nEdit titles, URLs and every field of your content: text, numbers, switches, choices, images and galleries. Long texts open a full-screen Markdown editor with live formatting, so headings, bold text, lists and links look the way they will on your site. Write your search engine title and description with a live Google preview and length hints, then save or publish. Unpublish, archive or delete when something has to go.\n\nMEDIA\nBrowse your photo library, upload new pictures straight from your phone with alt text for accessibility and search engines, copy or share links, and use any image in your pages.\n\nINBOX\nEvery contact and enquiry form of your website in one feed, grouped by day. Reply by email with one tap, copy a message, mark spam or delete it.\n\nAND MORE\nMenus, redirects, site settings, your team (invite, suspend, restore), webhooks with their delivery log, background jobs with retry, and your account. Screens and actions follow your role, so editors only see what they are allowed to do.\n\nSeveral websites? Sign in to all of them and switch with a tap.\n\nPRIVATE BY DESIGN\nThe app talks only to your website. Your sign-in stays in the iOS keychain; there is no tracking, no analytics and no third-party service in between.\n\nRequires a website running Skelpo CMS and an account on it. Available in English and German."
+    },
+    "de-DE": {
+      "name": "Skelpo CMS",
+      "subtitle": "Website unterwegs bearbeiten",
+      "privacyPolicyUrl": "https://www.skelpo.com/de/privacy",
+      "supportUrl": "https://www.skelpo.com/de/contact",
+      "marketingUrl": "https://www.skelpo.com/de/cms",
+      "promotionalText": "Seiten veröffentlichen, Fotos tauschen und Formularnachrichten beantworten, direkt vom Handy. Für jede Website mit Skelpo CMS.",
+      "keywords": "cms,homepage,website,editor,blog,redaktion,inhalte,seiten,medien,seo,markdown,admin",
+      "description": "Deine Website für die Hosentasche. Skelpo CMS ist die App zu Websites, die mit Skelpo CMS laufen. Tippfehler korrigieren, eine Neuigkeit veröffentlichen, ein Foto austauschen oder eine Anfrage beantworten, ganz ohne Laptop.\n\nSTART\nAuf einen Blick, was ansteht: Entwürfe, die auf ihre Veröffentlichung warten, Einträge in Prüfung, neue Nachrichten der Woche und fehlgeschlagene Hintergrundjobs. Mit einem Tipp geht es zurück zur Seite, an der du zuletzt gearbeitet hast.\n\nINHALTE\nAlle Inhaltstypen deiner Website an einem Ort: Seiten, Blogbeiträge, Produkte, Rezepte, Teammitglieder, FAQs und was deine Website sonst ausmacht. Nach Status und Sprache filtern, suchen und neue Entwürfe anlegen.\n\nEDITOR\nTitel, URLs und jedes Feld deiner Inhalte bearbeiten: Texte, Zahlen, Schalter, Auswahlen, Bilder und Galerien. Lange Texte öffnen sich in einem Markdown-Editor im Vollbild mit Live-Formatierung, sodass Überschriften, Fettungen, Listen und Links schon so aussehen wie später auf der Website. Titel und Beschreibung für Suchmaschinen schreibst du mit Live-Vorschau im Google-Stil und Längenhinweisen. Dann speichern oder veröffentlichen. Und wenn etwas weg muss: offline nehmen, archivieren oder löschen.\n\nMEDIEN\nDurch die Mediathek blättern, neue Fotos direkt vom Handy hochladen, mit Alternativtext für Barrierefreiheit und Suchmaschinen, Links kopieren oder teilen und jedes Bild in deinen Seiten verwenden.\n\nPOSTEINGANG\nAlle Kontakt- und Anfrageformulare deiner Website in einer Liste, nach Tagen sortiert. Mit einem Tipp per E-Mail antworten, Nachrichten kopieren, als Spam markieren oder löschen.\n\nUND MEHR\nMenüs, Weiterleitungen, Website-Einstellungen, dein Team (einladen, sperren, wieder freigeben), Webhooks mit Zustellprotokoll, Hintergrundjobs mit Wiederholen und dein Konto. Bildschirme und Aktionen richten sich nach deiner Rolle: Redakteure sehen nur, was sie auch dürfen.\n\nMehrere Websites? Melde dich bei allen an und wechsle mit einem Tipp.\n\nDATENSCHUTZ EINGEBAUT\nDie App spricht nur mit deiner Website. Deine Anmeldung bleibt im iOS-Schlüsselbund; kein Tracking, keine Analyse-Tools, keine Drittanbieter dazwischen.\n\nVoraussetzung ist eine Website mit Skelpo CMS und ein Konto darauf. Verfügbar auf Deutsch und Englisch."
+    }
+  }
+}

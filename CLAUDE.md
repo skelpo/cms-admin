@@ -28,6 +28,9 @@ client/ui.ts             design system: colour/type tokens (light + dark), cards
                          lists, pills, buttons, segmented control, chips, inputs, banners,
                          skeletons, empty states, stat tiles
 client/main.ts           shell, navigation and every screen
+client/i18n.ts           tr()/plural(): UI language (en/de) chosen at launch
+client/locales/de.ts     German strings, keyed by the English text
+appstore/metadata.json   App Store listing (en-US, de-DE), age rating, review notes
 assets/icon.png          1024px app icon (Skelpo S on orange)
 ```
 
@@ -62,6 +65,21 @@ assets/icon.png          1024px app icon (Skelpo S on orange)
   `widgetMatchParentWidth`) for anything that must span the width. Stack
   alignment 7 ("width") does not work on macOS.
 - Capabilities from `/auth/me` gate screens/actions (`can()`, `canType()`).
+
+## Languages (English + German)
+
+- Every user-facing string is `tr("English text", { param })` or
+  `plural(n, "{n} item", "{n} items")` from `client/i18n.ts`; the English text
+  is the key and `client/locales/de.ts` holds the German. Informal "du".
+  `make i18n` (also run by `make check`) fails on missing/unused keys or
+  mismatched `{placeholders}` — keys must be literals for it to see them.
+- CMS-provided text (type labels, field labels, form names, server error
+  messages) is shown as-is; `noun()` keeps German nouns capitalised mid-sentence.
+- Language = `getLocale()` at launch, overridable with the `SKELPO_LANG` user
+  default. iOS only reports German if the bundle declares it:
+  `scripts/ios-localize.sh` adds CFBundleLocalizations + en/de.lproj (run by
+  `make sim` and testflight.sh). That also lists both languages on the App
+  Store and gives the app a per-app language switch in iOS Settings.
 
 ## CMS contract gotchas (verified against ../skelpo-cms code)
 
@@ -187,12 +205,19 @@ make device                    # connected iPhone (perry setup ios --development
 make testflight                # build, sign, validate, upload to TestFlight (build no. = last + 1)
 make ipa                       # same, stop at build/release/SkelpoCMS.ipa
 make asc-status                # bundle ID, App Store profile, app record, recent builds
+make i18n                      # German strings vs. tr() keys
+scripts/screenshots.sh         # App Store screenshots, en + de
+python3 scripts/asc.py metadata    # push appstore/metadata.json
 ```
 
 Simulator automation (no UI driver on iOS): set user defaults, then launch —
 `xcrun simctl spawn booted defaults write com.skelpo.cmsadmin SKELPO_DEV_URL
 http://127.0.0.1:3137` (+ `_EMAIL`, `_PASSWORD`, `_TAB` 0–4, `_TYPE` slug,
 `_EDIT` 1, `_WRITE` body), and `xcrun simctl io booted screenshot x.png`.
+
+App Store screenshots: `scripts/screenshots.sh` (en-US + de-DE, 6.9" "Shots
+iPhone 6.9" simulator, status bar 9:41) → `appstore/screenshots/`, then
+`python3 scripts/asc.py screenshots appstore/screenshots`.
 
 Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
 `../verrano/CLAUDE.md` for credentials). On a phone the server must be https.
@@ -206,8 +231,13 @@ Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
   #14799. It post-processes Perry's bundle: actool icon (Assets.car), privacy
   manifest (`assets/ios/PrivacyInfo.xcprivacy`), CFBundleName, build number,
   drops Perry's template camera/mic usage strings (another app's wording),
-  iPhone portrait only, then signs with Apple Distribution + the App Store
+  iPhone-only (UIDeviceFamily 1; iPad can be added later, never removed),
+  portrait, en/de localizations, then signs with Apple Distribution + the App Store
   profile and uploads with `altool --apiKey`.
+- Listing text, categories, age rating, copyright and review notes:
+  `appstore/metadata.json` → `python3 scripts/asc.py metadata`. Not settable by
+  API (do it in the web UI): App Privacy ("Data Not Collected"), price and
+  availability, review contact and the demo account.
 - The Perry compiler must link LLVM 22 (`LLVM_SYS_221_PREFIX=/opt/homebrew/opt/llvm@22`);
   Homebrew's `llvm` is 23, which rejects Perry's iOS `Os` level.
 - The Makefile now points at the `ui-ios-fixes` worktree (the #14799 branch);
