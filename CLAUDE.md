@@ -160,11 +160,17 @@ local change in the worktree, and the simulator keychain entitlement.
   worktree. The package must be in `package.json` `perry.allow.nativeLibrary`.
 - iOS tap gestures crashed in UIKit (`-[UIGestureRecognizer _delayTouch:forEvent:]`
   inserting nil) when an async re-render removed the touched view mid-touch.
-  Root cause (from UIKit disassembly): a recognizer whose
-  `_delayedEventComponentDispatcher` was cleared because UIKit unregistered it
-  when its view left the window. Patched in `perry-ui-ios/src/touch_guard.rs`:
-  `PerryWindow` tracks active touches; while one is down, removed views are
-  hidden and detached only after it ends (build 0.2.0 (3)).
+  Root cause (found on device): perry/ui builds the shell before
+  UIApplicationMain, so recognizers added then (the main ScrollView's) never
+  got a `_delayedEventComponentDispatcher`. Fixed in
+  `perry-ui-ios/src/touch_guard.rs` (`reregister_early_recognizers`, called
+  after the window is shown); build 0.2.0 (4).
+- Debugging on the phone: `scripts/devphone.sh` installs a development build
+  (profile ~/.perry/com_skelpo_cmsadmin_dev.mobileprovision) and streams its
+  console; `UI_DRIVER=1` adds the geisterhand driver, and `scripts/phone-ui.sh`
+  drives it over Wi-Fi (widgets / click / type / screenshot). Careful: the
+  phone is signed in to the live sites — the last tappable on the item editor
+  is "Save changes".
 - The Makefile pins `PERRY_WT` to the patched worktree: `~/.local/bin/perry`
   may point at another worktree without these fixes. macOS dev builds are
   signed with the Developer ID (`MAC_SIGN`) so the keychain doesn't prompt
