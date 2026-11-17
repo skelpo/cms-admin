@@ -1,0 +1,6 @@
+# Perry builds native-library crates (node_modules/@skelpo/markdown-editor)
+# with cargo from this directory, so this config applies to them: build
+# against the local Perry checkout's perry-ffi instead of fetching
+# PerryTS/perry from GitHub. Paths are relative to this file's parent.
+[patch."https://github.com/PerryTS/perry"]
+perry-ffi = { path = "../perry/worktrees/ui-ios-fixes/crates/perry-ffi" }

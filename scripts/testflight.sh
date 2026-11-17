@@ -29,6 +29,8 @@ NAME=SkelpoCMS
 OUT=build/release
 APP="$OUT/$NAME.app"
 PB=/usr/libexec/PlistBuddy
+# Native-library crates (@skelpo/markdown-editor) build with Perry's nightly.
+export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-10-04}"
 
 [[ -x "$PERRY_WT/perry" ]] || { echo "no perry at $PERRY_WT (set PERRY_WT)"; exit 1; }
 [[ -f "$PROFILE" ]] || python3 scripts/asc.py setup

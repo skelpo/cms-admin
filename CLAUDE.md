@@ -146,8 +146,21 @@ local change in the worktree, and the simulator keychain entitlement.
 - Simulator builds have no keychain entitlement (Perry doesn't embed the
   simulator `__entitlements` section), so sign-ins don't persist across
   launches in the simulator. Device builds get it from the provisioning profile.
-- `@honeide/editor` is not integrated; rich text fields are edited as Markdown
-  in a TextArea.
+- Rich-text fields use `@skelpo/markdown-editor` (`../skelpo-markdown-editor`,
+  linked via `file:`): a native UITextView/NSTextView with live Markdown
+  styling. Phone: the field is a preview card that opens the full-screen
+  Write screen (`R_WRITE`, drawn in `writePane` instead of the shared
+  ScrollView). Desktop: inline editor under a formatting bar. One editor per
+  field of the open item (`mdEditors`), kept across redraws. Image toolbar
+  button → media picker (`pickMarkdown`) → inserts `![alt](/api/v1/media/<id>/raw)`.
+  Its Rust crate is built by Perry with cargo from this directory:
+  `RUSTUP_TOOLCHAIN=nightly-2026-10-04` (set in the Makefile and
+  testflight.sh) and `.cargo/config.toml` points perry-ffi at the local Perry
+  worktree. The package must be in `package.json` `perry.allow.nativeLibrary`.
+- iOS tap gestures crashed in UIKit (`-[UIGestureRecognizer _delayTouch:forEvent:]`
+  inserting nil) when an async re-render removed the touched view mid-touch.
+  Patched in `perry-ui-ios`: tap recognizers don't delay touchesEnded, and
+  `clear_children` / `remove_child` cancel active gestures before removing.
 - The Makefile pins `PERRY_WT` to the patched worktree: `~/.local/bin/perry`
   may point at another worktree without these fixes. macOS dev builds are
   signed with the Developer ID (`MAC_SIGN`) so the keychain doesn't prompt
@@ -169,7 +182,7 @@ make asc-status                # bundle ID, App Store profile, app record, recen
 Simulator automation (no UI driver on iOS): set user defaults, then launch —
 `xcrun simctl spawn booted defaults write com.skelpo.cmsadmin SKELPO_DEV_URL
 http://127.0.0.1:3137` (+ `_EMAIL`, `_PASSWORD`, `_TAB` 0–4, `_TYPE` slug,
-`_EDIT` 1), and `xcrun simctl io booted screenshot x.png`.
+`_EDIT` 1, `_WRITE` body), and `xcrun simctl io booted screenshot x.png`.
 
 Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
 `../verrano/CLAUDE.md` for credentials). On a phone the server must be https.
@@ -188,7 +201,7 @@ Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
 - The Perry compiler must link LLVM 22 (`LLVM_SYS_221_PREFIX=/opt/homebrew/opt/llvm@22`);
   Homebrew's `llvm` is 23, which rejects Perry's iOS `Os` level.
 - The Makefile now points at the `ui-ios-fixes` worktree (the #14799 branch);
-  only macOS and aarch64-apple-ios archives are built there (no simulator yet).
+  macOS, aarch64-apple-ios and aarch64-apple-ios-sim archives are built there.
 
 ## Adding an endpoint
 

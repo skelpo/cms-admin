@@ -625,6 +625,18 @@ export function iconButton(name: string, c: Rgba, run: () => void): Widget {
   onTap(box, run);
   return box;
 }
+/**
+ * Compact formatting-bar button: an SF Symbol, or a short text label such as
+ * "H2" when `icon` is empty.
+ */
+export function toolButton(icon: string, label: string, c: Rgba, run: () => void): Widget {
+  const inner = icon.length > 0 ? symbol(icon, 15, c) : text(label, 13, 700, c, 1);
+  const box = centerBox(inner, 32, 30, icon.length > 0 ? 15 : lineH(13));
+  setCornerRadius(box, 7);
+  onTap(box, run);
+  hoverTint(box, [0, 0, 0, 0]);
+  return box;
+}
 /** A horizontal row of equal-width buttons. */
 export function buttonRow(buttons: Widget[]): Widget {
   const r = HStack(10, []);

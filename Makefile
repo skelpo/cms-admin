@@ -14,6 +14,10 @@ BUNDLE_ID := com.skelpo.cmsadmin
 # requests hang. Override with `make PERRY_WT=/path/to/target/release`.
 PERRY_WT ?= $(abspath ../perry/worktrees/ui-ios-fixes/target/release)
 PERRY := PERRY_RUNTIME_DIR=$(PERRY_WT) $(PERRY_WT)/perry
+# Perry runs `cargo build` for native-library packages
+# (@skelpo/markdown-editor) from this directory; perry-ffi needs Perry's
+# pinned nightly. .cargo/config.toml points perry-ffi at the local checkout.
+export RUSTUP_TOOLCHAIN ?= nightly-2026-10-04
 # PERRY_RUNTIME_DIR is searched before the per-target dirs, so cross builds
 # point it at that target's archives (else the macOS ones get linked).
 # iOS code targets apple-a12, the oldest chip iOS 17 runs on. Without it the

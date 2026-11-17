@@ -51,6 +51,18 @@ import {
 } from "perry/ui";
 import type { Widget } from "perry/ui";
 import { getAppVersion, getDeviceIdiom, getSafeAreaInsets, imagePickerPick, openURL, preferencesGet, shareUrl } from "perry/system";
+import {
+  Format,
+  destroyEditor,
+  focusEditor,
+  getMarkdown,
+  insertMarkdown,
+  markdownEditor,
+  runFormat,
+  setPreview,
+  wordCount,
+} from "@skelpo/markdown-editor";
+import type { MarkdownEditor } from "@skelpo/markdown-editor";
 import * as api from "./api.js";
 import * as store from "./storage.js";
 import { ApiError, errorMessage } from "../shared/api/errors.js";
@@ -172,6 +184,7 @@ import {
   textArea,
   tintFill,
   title2,
+  toolButton,
 } from "./ui.js";
 import type { Rgba } from "./ui.js";
 
@@ -419,6 +432,7 @@ const R_HOME = "home";
 const R_TYPES = "types";
 const R_CONTENT = "content";
 const R_EDITOR = "editor";
+const R_WRITE = "write";
 const R_NEW = "new";
 const R_MEDIA = "media";
 const R_MEDIA_DETAIL = "mediaDetail";
@@ -492,6 +506,12 @@ const scroll = ScrollView();
 scrollviewSetChild(scroll, content);
 widgetSetHugging(scroll, 1);
 
+// Phone Write screen: the Markdown editor scrolls itself, so it replaces the
+// shared ScrollView instead of sitting inside it.
+const writePane = column(0);
+widgetSetHugging(writePane, 1);
+widgetSetHidden(writePane, 1);
+
 const actionInner = HStack(10, []);
 stackSetDistribution(actionInner, 1);
 setPadding(actionInner, 12, PAD, bottomInset > 0 ? bottomInset : 12, PAD);
@@ -531,10 +551,11 @@ if (isDesktop) {
   widgetMatchParentHeight(mainCol);
   stackSetDetachesHidden(root, 1);
 } else {
-  root = VStack(0, [header, headerRule, noticeWrap, scroll, actionBar, tabWrap]);
+  root = VStack(0, [header, headerRule, noticeWrap, writePane, scroll, actionBar, tabWrap]);
   widgetMatchParentWidth(header);
   widgetMatchParentWidth(headerRule);
   widgetMatchParentWidth(noticeWrap);
+  widgetMatchParentWidth(writePane);
   widgetMatchParentWidth(scroll);
   widgetMatchParentWidth(actionBar);
   widgetMatchParentWidth(tabWrap);
@@ -848,7 +869,7 @@ function setDesktopHeader(eyebrow: string, title: string, trailing: Widget[]): v
   add(header, r);
 }
 
-function setLargeHeader(eyebrow: string, title: string, trailing: Widget[]): void {
+function setLargeHeader(eyebrow: string, title: string, trailing: Widget[], onTitleTap: (() => void) | null = null): void {
   if (isDesktop) {
     setDesktopHeader(eyebrow, title, trailing);
     return;
@@ -859,7 +880,14 @@ function setLargeHeader(eyebrow: string, title: string, trailing: Widget[]): voi
   const r = hrow(10);
   const texts = column(0);
   if (eyebrow.length > 0) put(texts, text(eyebrow, 14, 500, MUTED, 1));
-  put(texts, largeTitle(title));
+  if (onTitleTap) {
+    // Tappable title (Home: site switcher), with a chevron like iOS menus.
+    const t = hrow(6);
+    put(t, largeTitle(title));
+    put(t, symbol("chevron.down.circle.fill", 20, FAINT));
+    onTap(t, onTitleTap);
+    put(texts, t);
+  } else put(texts, largeTitle(title));
   put(r, grow(texts));
   for (let i = 0; i < trailing.length; i++) {
     const w = trailing[i];
@@ -966,13 +994,16 @@ function render(reload: boolean): void {
   widgetSetHidden(header, signedOut ? 1 : 0);
   widgetSetHidden(headerRule, signedOut ? 1 : 0);
   widgetSetHidden(actionBar, 1);
+  const writing = route === R_WRITE && !isDesktop;
   if (isDesktop) {
     widgetSetHidden(sidebar, signedOut ? 1 : 0);
     widgetSetHidden(sideRule, signedOut ? 1 : 0);
     if (!signedOut) paintSidebar();
   } else {
-    widgetSetHidden(tabWrap, signedOut ? 1 : 0);
+    widgetSetHidden(tabWrap, signedOut || writing ? 1 : 0);
     if (!signedOut) paintTabs();
+    widgetSetHidden(writePane, writing ? 0 : 1);
+    widgetSetHidden(scroll, writing ? 1 : 0);
   }
 
   if (route === R_SIGNIN) screenSignIn();
@@ -980,6 +1011,7 @@ function render(reload: boolean): void {
   else if (route === R_TYPES) screenTypes(seq, reload);
   else if (route === R_CONTENT) screenContent(seq, reload);
   else if (route === R_EDITOR) screenEditor();
+  else if (route === R_WRITE) screenWrite();
   else if (route === R_NEW) screenNewItem();
   else if (route === R_MEDIA) screenMedia(seq, reload);
   else if (route === R_MEDIA_DETAIL) screenMediaDetail();
@@ -1253,7 +1285,15 @@ async function devNavigate(): Promise<void> {
   if (devEnv("SKELPO_DEV_EDIT") !== "1") return;
   const page = await api.listContent({ type: t.slug, status: "published", limit: 1 });
   const first = page.data[0];
-  if (first) openEditor(first);
+  if (!first) return;
+  openEditor(first);
+  // _WRITE=<field>: open the Markdown Write screen for that field.
+  const wf = devEnv("SKELPO_DEV_WRITE");
+  if (wf.length > 0) {
+    const ed = mdEditorFor(wf);
+    openWriter(wf, wf);
+    if (devEnv("SKELPO_DEV_FOCUS") === "1") setTimeout(() => focusEditor(ed), 800);
+  }
 }
 
 /** Rotate the session only when it is within a week of its 30-day expiry. */
@@ -1582,7 +1622,7 @@ function screenHome(seq: number, reload: boolean): void {
     onTap(av, () => go(R_ACCOUNT));
     trailing.push(av);
   }
-  setLargeHeader(`${greeting()}${name.length > 0 ? `, ${name}` : ""}`, siteName(api.getBaseUrl()), trailing);
+  setLargeHeader(`${greeting()}${name.length > 0 ? `, ${name}` : ""}`, siteName(api.getBaseUrl()), trailing, () => siteMenu());
   if (homeLoaded) drawHome();
   else {
     add(content, homeHero(true));
@@ -2257,6 +2297,12 @@ function isLongText(def: FieldDef): boolean {
 }
 
 function loadEditorBuffers(it: ContentItem): void {
+  // A different item gets fresh Markdown editors; a reload of the same one
+  // (after saving) keeps them, with their caret and undo history.
+  if (it.id !== mdItemId) {
+    resetMarkdownEditors();
+    mdItemId = it.id;
+  }
   edItem = it;
   edType = typeBySlug(it.type);
   edTitle = it.title;
@@ -2532,7 +2578,182 @@ function redrawEditor(): void {
 function pickImageFor(name: string, append: boolean): void {
   pickField = name;
   pickAppend = append;
+  pickMarkdown = false;
   go(R_MEDIA);
+}
+
+// ---------- Markdown fields (@skelpo/markdown-editor) ---------------------
+//
+// Rich-text fields are Markdown. Phone: the field is a preview card that opens
+// the full-screen Write screen. Desktop: the editor sits inline under a
+// formatting bar. One native editor per field of the open item, kept across
+// redraws so the caret, selection and undo history survive (including a trip
+// to the image picker).
+
+let mdEditors: Record<string, MarkdownEditor> = {};
+let mdItemId = -1;
+let mdWordLabels: Record<string, Widget> = {};
+let pickMarkdown = false;
+let wrField = "";
+let wrTitle = "";
+let wrPreview = false;
+
+const MD_TOOLBAR = ["h2", "h3", "bold", "italic", "link", "action:photo:1", "bullet", "numbered", "quote", "code", "strike", "task", "rule", "undo", "redo"];
+
+function resetMarkdownEditors(): void {
+  for (const k in mdEditors) {
+    const e = mdEditors[k];
+    if (e) destroyEditor(e);
+  }
+  mdEditors = {};
+  mdWordLabels = {};
+}
+
+function wordsLine(n: number): string {
+  if (n === 0) return "Empty";
+  return `${plural(n, "word", "words")} · ${Math.max(1, Math.round(n / 200))} min read`;
+}
+
+function updateWordLabel(name: string): void {
+  const e = mdEditors[name];
+  const l = mdWordLabels[name];
+  if (e && l) textSetString(l, wordsLine(wordCount(e)));
+}
+
+function mdEditorFor(name: string): MarkdownEditor {
+  const have = mdEditors[name];
+  if (have) return have;
+  const v = edValues[name];
+  const ed = markdownEditor({
+    text: typeof v === "string" ? v : "",
+    placeholder: "Start writing… Markdown works: # heading, **bold**, - list",
+    fontSize: isDesktop ? 15 : 17,
+    accent: [BRAND_INK[0], BRAND_INK[1], BRAND_INK[2]],
+    toolbar: MD_TOOLBAR,
+    onChange: () => {
+      const e = mdEditors[name];
+      if (!e) return;
+      edValues[name] = getMarkdown(e);
+      touch();
+      updateWordLabel(name);
+    },
+    onAction: (code: number) => {
+      if (code === 1) pickImageForMarkdown(name);
+    },
+  });
+  mdEditors[name] = ed;
+  return ed;
+}
+
+function pickImageForMarkdown(name: string): void {
+  pickField = name;
+  pickAppend = false;
+  pickMarkdown = true;
+  go(R_MEDIA);
+}
+
+/** First lines of the Markdown with markers stripped, for the phone card. */
+function markdownExcerpt(md: string): string {
+  const out: string[] = [];
+  const lines = md.split("\n");
+  let fence = false;
+  for (let i = 0; i < lines.length && out.length < 3; i++) {
+    let l = (lines[i] ?? "").trim();
+    if (l.startsWith("```")) {
+      fence = !fence;
+      continue;
+    }
+    if (fence || l.length === 0 || l.startsWith("![")) continue;
+    l = l.replace(/^#{1,6}\s+/, "").replace(/^>\s?/, "").replace(/^([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, "");
+    l = l.replace(/\*\*|__|~~|`/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+    if (l.length > 0) out.push(l);
+  }
+  return out.join(" ");
+}
+
+function markdownField(name: string, title: string, help: string): Widget {
+  const ed = mdEditorFor(name);
+  const words = caption(wordsLine(wordCount(ed)));
+  mdWordLabels[name] = words;
+
+  if (isDesktop) {
+    const box = column(0);
+    bg(box, SURFACE2);
+    setCornerRadius(box, 12);
+    const bar = hrow(2);
+    setPadding(bar, 5, 8, 5, 8);
+    const tb = (icon: string, label: string, cmd: number): void => {
+      put(bar, toolButton(icon, label, BODY, () => runFormat(ed, cmd)));
+    };
+    tb("", "H2", Format.Heading2);
+    tb("", "H3", Format.Heading3);
+    tb("bold", "", Format.Bold);
+    tb("italic", "", Format.Italic);
+    tb("strikethrough", "", Format.Strikethrough);
+    tb("link", "", Format.Link);
+    put(bar, toolButton("photo", "", BODY, () => pickImageForMarkdown(name)));
+    tb("list.bullet", "", Format.BulletList);
+    tb("list.number", "", Format.NumberedList);
+    tb("text.quote", "", Format.Quote);
+    tb("chevron.left.forwardslash.chevron.right", "", Format.InlineCode);
+    put(bar, Spacer());
+    put(bar, words);
+    add(box, bar);
+    add(box, divider(0));
+    widgetSetHeight(ed.widget, 480);
+    add(box, ed.widget);
+    return field(title, tag("MARKDOWN"), box, help.length > 0 ? help : "⌘B bold · ⌘I italic · ⌘K link");
+  }
+
+  const v = edValues[name];
+  const md = typeof v === "string" ? v : "";
+  const c = card(14, 8);
+  const ex = markdownExcerpt(md);
+  add(c, text(ex.length > 0 ? ex : "Tap to start writing", 15, 400, ex.length > 0 ? BODY : FAINT, 3));
+  const foot = hrow(6);
+  put(foot, symbol("square.and.pencil", 14, BRAND_INK));
+  put(foot, grow(text(ex.length > 0 ? "Edit" : "Write", 14, 600, BRAND_INK, 1)));
+  put(foot, words);
+  add(c, foot);
+  onTap(c, () => openWriter(name, title));
+  return field(title, tag("MARKDOWN"), c, help);
+}
+
+function openWriter(name: string, title: string): void {
+  wrField = name;
+  wrTitle = title.replace(/ \*$/, "");
+  wrPreview = false;
+  go(R_WRITE);
+}
+
+/** Phone: full-screen Markdown editor for one field (writePane, not the ScrollView). */
+function screenWrite(): void {
+  const ed = mdEditors[wrField];
+  if (!ed || !edItem) {
+    leave();
+    return;
+  }
+  setBarHeader(wrTitle, [
+    headerAction(wrPreview ? "pencil" : "eye", wrPreview ? "Edit" : "Preview", () => {
+      wrPreview = !wrPreview;
+      setPreview(ed, wrPreview);
+      render(false);
+    }),
+  ]);
+  setPreview(ed, wrPreview);
+  widgetClearChildren(writePane);
+  widgetSetHugging(ed.widget, 1);
+  add(writePane, ed.widget);
+  const status = hrow(8);
+  setPadding(status, 6, GUTTER, 8, GUTTER);
+  const words = caption(wordsLine(wordCount(ed)));
+  mdWordLabels[wrField] = words;
+  put(status, words);
+  put(status, Spacer());
+  put(status, caption(wrPreview ? "Preview" : "Markdown"));
+  add(writePane, divider(0));
+  add(writePane, status);
+  if (!wrPreview && getMarkdown(ed).length === 0) setTimeout(() => focusEditor(ed), 350);
 }
 
 /** One schema field's editing widget. Its own function so each closure keeps its `def`. */
@@ -2679,6 +2900,7 @@ function fieldEditor(def: FieldDef): Widget {
       help.length > 0 ? help : hint,
     );
   }
+  if (def.type === "richtext") return markdownField(name, title, help);
   if (isLongText(def)) {
     return field(
       title,
@@ -2998,6 +3220,23 @@ function drawMediaGrid(picking: boolean): void {
 function choosePickedMedia(m: MediaItem): void {
   const name = pickField;
   pickField = "";
+  if (pickMarkdown) {
+    pickMarkdown = false;
+    const ed = mdEditors[name];
+    haptic("light");
+    leave();
+    if (ed) {
+      const locale = edItem ? edItem.locale : defaultLocale;
+      const alt = (m.altText[locale] ?? m.altText[defaultLocale] ?? "").replace(/[\[\]]/g, "");
+      // Relative URL: the CMS serves media on the site's own domain.
+      const url = m.urlRaw.length > 0 ? m.urlRaw : `/api/v1/media/${m.id}/raw`;
+      setTimeout(() => {
+        insertMarkdown(ed, `![${alt}](${url})`);
+        focusEditor(ed);
+      }, 60);
+    }
+    return;
+  }
   if (pickAppend) {
     const ids = galleryIds(edRaw[name] ?? "") ?? [];
     ids.push(m.id);
