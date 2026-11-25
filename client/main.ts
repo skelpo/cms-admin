@@ -50,7 +50,7 @@ import {
   widgetSetWidth,
 } from "perry/ui";
 import type { Widget } from "perry/ui";
-import { getAppVersion, getDeviceIdiom, getSafeAreaInsets, imagePickerPick, openURL, preferencesGet, shareUrl } from "perry/system";
+import { getAppVersion, getSafeAreaInsets, imagePickerPick, openURL, preferencesGet, shareUrl } from "perry/system";
 import {
   Format,
   destroyEditor,
@@ -65,6 +65,7 @@ import {
 import type { MarkdownEditor } from "@skelpo/markdown-editor";
 import * as api from "./api.js";
 import * as store from "./storage.js";
+import { decimal, isGerman, noun, plural, tr } from "./i18n.js";
 import { ApiError, errorMessage } from "../shared/api/errors.js";
 import type {
   ContentItem,
@@ -160,6 +161,8 @@ import {
   isIOS,
   isAndroid,
   isDesktop,
+  isPad,
+  isWide,
   hoverTint,
   centeredLabel,
   isMobile,
@@ -188,13 +191,13 @@ import {
 } from "./ui.js";
 import type { Rgba } from "./ui.js";
 
-const isPad = getDeviceIdiom() === "pad";
-
 // Development hooks for driving the simulator from the command line, read
 // from user defaults (`xcrun simctl spawn booted defaults write
 // com.skelpo.cmsadmin SKELPO_DEV_URL http://…`). Never set in production.
 // SKELPO_DEV_URL/_EMAIL/_PASSWORD sign in; _TAB opens a tab (0–4); _TYPE
-// opens a content type by slug; _EDIT=1 then opens its first item.
+// opens a content type by slug; _EDIT=1 then opens its first item; _HOST
+// shows a local server under a public name (screenshots); _ACTION=upload|share
+// opens the photo picker or share sheet.
 // (Not process.env: building that object aborts the Perry runtime on iOS
 // when the environment is large.)
 function devEnv(key: string): string {
@@ -203,13 +206,15 @@ function devEnv(key: string): string {
   return typeof v === "string" ? v : "";
 }
 /** Horizontal page margin. */
-const GUTTER = isDesktop ? 32 : PAD;
+const GUTTER = isWide ? 32 : PAD;
 /** Height of primary action buttons (bottom bar on phones, toolbar on desktop). */
-const AB_H = isDesktop ? 34 : 50;
+const AB_H = isDesktop ? 34 : isPad ? 44 : 50;
 
 // ---------- formatting helpers ------------------------------------------
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS = isGerman
+  ? ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."]
+  : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function shortDate(iso: string | null): string {
   if (!iso || iso.length < 10) return "";
@@ -223,24 +228,29 @@ function parseTime(iso: string | null): number {
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
-/** "12 Mar" or "12 Mar 2024" for other years. */
+/** "12 Mar" / "12. März", with the year when it isn't this one. */
 function dayMonth(t: number): string {
   const d = new Date(t);
   const now = new Date();
   const y = d.getFullYear() === now.getFullYear() ? "" : ` ${d.getFullYear()}`;
-  return `${d.getDate()} ${MONTHS[d.getMonth()] ?? ""}${y}`;
+  return `${d.getDate()}${isGerman ? "." : ""} ${MONTHS[d.getMonth()] ?? ""}${y}`;
 }
 /** "Just now", "5 min ago", "3 h ago", "Yesterday", "4 days ago", "12 Mar". */
 function relTime(iso: string | null): string {
   const t = parseTime(iso);
   if (t === 0) return shortDate(iso);
   const s = (Date.now() - t) / 1000;
-  if (s < 60) return "Just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  if (s < 172800) return "Yesterday";
-  if (s < 7 * 86400) return `${Math.floor(s / 86400)} days ago`;
+  if (s < 60) return tr("Just now");
+  if (s < 3600) return tr("{n} min ago", { n: Math.floor(s / 60) });
+  if (s < 86400) return tr("{n} h ago", { n: Math.floor(s / 3600) });
+  if (s < 172800) return tr("Yesterday");
+  if (s < 7 * 86400) return tr("{n} days ago", { n: Math.floor(s / 86400) });
   return dayMonth(t);
+}
+/** relTime for use mid-sentence ("Edited yesterday"). */
+function relTimeInline(iso: string | null): string {
+  const s = relTime(iso);
+  return s.length > 0 ? s.charAt(0).toLowerCase() + s.slice(1) : s;
 }
 /** Inbox-style stamp: "14:05" today, "Yesterday", weekday name, or date. */
 function inboxTime(iso: string | null): string {
@@ -249,7 +259,7 @@ function inboxTime(iso: string | null): string {
   const d = new Date(t);
   const bucket = dayBucket(iso);
   if (bucket === 0) return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  if (bucket === 1) return "Yesterday";
+  if (bucket === 1) return tr("Yesterday");
   return dayMonth(t);
 }
 function fullTime(iso: string | null): string {
@@ -268,14 +278,17 @@ function dayBucket(iso: string | null): number {
   if (t >= start - 6 * 86400000) return 2;
   return 3;
 }
-const BUCKET_LABELS = ["Today", "Yesterday", "This week", "Earlier"];
+const BUCKET_LABELS = [tr("Today"), tr("Yesterday"), tr("This week"), tr("Earlier")];
 
 function baseName(p: string): string {
   const i = p.lastIndexOf("/");
   return i >= 0 ? p.slice(i + 1) : p;
 }
+/** Simulator dev hook: a local server shown under a public name (App Store screenshots). */
+const devHost = devEnv("SKELPO_DEV_HOST");
 function hostOf(url: string): string {
-  return url.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  const h = url.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  return devHost.length > 0 && /^(127\.0\.0\.1|localhost)(:|$)/.test(h) ? devHost : h;
 }
 /** "www.verrano.de" → "verrano.de" for titles. */
 function siteName(url: string): string {
@@ -286,7 +299,7 @@ function plausibleDims(m: MediaItem): string {
   return `${m.width} × ${m.height}`;
 }
 function fileSize(bytes: number): string {
-  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+  if (bytes >= 1048576) return `${decimal(bytes / 1048576, 1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 function decodeName(name: string): string {
@@ -320,19 +333,16 @@ function slugify(input: string): string {
   s = s.replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").replace(/-+$/, "");
   return s.length > 75 ? s.slice(0, 75).replace(/-+$/, "") : s;
 }
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
 function firstName(name: string): string {
   const p = name.trim().split(/\s+/)[0] ?? "";
   return p.length > 0 ? p : name;
 }
 function greeting(): string {
   const h = new Date().getHours();
-  if (h < 5) return "Good evening";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
+  if (h < 5) return tr("Good evening");
+  if (h < 12) return tr("Good morning");
+  if (h < 18) return tr("Good afternoon");
+  return tr("Good evening");
 }
 
 // ---------- content type look -------------------------------------------
@@ -407,21 +417,21 @@ function typeTile(slug: string, size: number): Widget {
 }
 
 const STATUS_KEYS = ["published", "draft", "review", "archived"];
-const STATUS_LABELS = ["Live", "Drafts", "In review", "Archived"];
+const STATUS_LABELS = [tr("Live"), tr("Drafts"), tr("In review"), tr("Archived")];
 
 function statusPill(status: string): Widget {
-  if (status === "published") return pill("Live", K_OK);
-  if (status === "draft") return pill("Draft", K_WARN);
-  if (status === "review") return pill("In review", K_INFO);
-  if (status === "scheduled") return pill("Scheduled", K_BRAND);
-  if (status === "archived") return pill("Archived", K_NEUTRAL);
+  if (status === "published") return pill(tr("Live"), K_OK);
+  if (status === "draft") return pill(tr("Draft"), K_WARN);
+  if (status === "review") return pill(tr("In review"), K_INFO);
+  if (status === "scheduled") return pill(tr("Scheduled"), K_BRAND);
+  if (status === "archived") return pill(tr("Archived"), K_NEUTRAL);
   return pill(status, K_NEUTRAL);
 }
 function statusWord(status: string): string {
-  if (status === "published") return "Live";
-  if (status === "draft") return "Draft";
-  if (status === "review") return "In review";
-  if (status === "archived") return "Archived";
+  if (status === "published") return tr("Live");
+  if (status === "draft") return tr("Draft");
+  if (status === "review") return tr("In review");
+  if (status === "archived") return tr("Archived");
   return status;
 }
 
@@ -455,7 +465,7 @@ const R_INVITE = "invite";
 const R_ACCOUNT = "account";
 
 const TAB_ROOTS = [R_HOME, R_TYPES, R_MEDIA, R_FORMS, R_MORE];
-const TAB_LABELS = ["Home", "Content", "Media", "Inbox", "More"];
+const TAB_LABELS = [tr("Home"), tr("Content"), tr("Media"), tr("Inbox"), tr("More")];
 const TAB_ICONS = ["house", "doc.text", "photo.on.rectangle", "tray", "square.grid.2x2"];
 const TAB_ICONS_ON = ["house.fill", "doc.text.fill", "photo.fill.on.rectangle.fill", "tray.fill", "square.grid.2x2.fill"];
 
@@ -499,7 +509,7 @@ bg(header, SURFACE);
 const headerRule = divider(0);
 
 const noticeWrap = column(0);
-setPadding(noticeWrap, 10, isDesktop ? 32 : PAD, 0, isDesktop ? 32 : PAD);
+setPadding(noticeWrap, 10, isWide ? 32 : PAD, 0, isWide ? 32 : PAD);
 
 const content = column(14);
 const scroll = ScrollView();
@@ -536,7 +546,7 @@ const sideRule = VStack(0, []);
 widgetSetWidth(sideRule, 1);
 bg(sideRule, HAIRLINE);
 let root: Widget;
-if (isDesktop) {
+if (isWide) {
   const mainCol = VStack(0, [header, headerRule, noticeWrap, scroll]);
   widgetMatchParentWidth(header);
   widgetMatchParentWidth(headerRule);
@@ -545,7 +555,7 @@ if (isDesktop) {
   stackSetDetachesHidden(mainCol, 1);
   widgetSetHugging(mainCol, 1);
   root = HStack(0, [sidebar, sideRule, mainCol]);
-  widgetSetWidth(sidebar, 240);
+  widgetSetWidth(sidebar, isPad ? 290 : 240);
   widgetMatchParentHeight(sidebar);
   widgetMatchParentHeight(sideRule);
   widgetMatchParentHeight(mainCol);
@@ -604,21 +614,21 @@ function setNotice(message: string, kind: number): void {
  */
 function fail(e: unknown): void {
   if (e instanceof ApiError && e.status === 401 && me) {
-    endSession("Your session has ended. Sign in again.");
+    endSession(tr("Your session has ended. Sign in again."));
     return;
   }
   setNotice(errorMessage(e), 1);
 }
 
 function confirm(title: string, message: string, actionLabel: string, onConfirm: () => void): void {
-  alertWithButtons(title, message, ["Cancel", actionLabel], (index: number) => {
+  alertWithButtons(title, message, [tr("Cancel"), actionLabel], (index: number) => {
     if (index === 1) onConfirm();
   });
 }
 /** A list of actions in an alert, with Cancel last. */
 function actionMenu(title: string, labels: string[], handlers: (() => void)[]): void {
   const all = labels.slice(0);
-  all.push("Cancel");
+  all.push(tr("Cancel"));
   alertWithButtons(title, "", all, (index: number) => {
     const h = handlers[index];
     if (h) h();
@@ -667,7 +677,7 @@ function leave(): void {
 function goBack(): void {
   if (navStack.length <= 1) return;
   if (currentRoute() === R_EDITOR && edDirty) {
-    confirm("Discard changes?", "Your edits to this item haven't been saved.", "Discard", () => {
+    confirm(tr("Discard changes?"), tr("Your edits to this item haven't been saved."), tr("Discard"), () => {
       edDirty = false;
       leave();
     });
@@ -678,7 +688,7 @@ function goBack(): void {
 
 function switchTab(index: number): void {
   if (currentRoute() === R_EDITOR && edDirty) {
-    confirm("Discard changes?", "Your edits to this item haven't been saved.", "Discard", () => {
+    confirm(tr("Discard changes?"), tr("Your edits to this item haven't been saved."), tr("Discard"), () => {
       edDirty = false;
       switchTab(index);
     });
@@ -698,7 +708,7 @@ function switchTab(index: number): void {
 /** Desktop sidebar entry: jump to a top-level screen. */
 function navRoot(route: string): void {
   if (currentRoute() === R_EDITOR && edDirty) {
-    confirm("Discard changes?", "Your edits to this item haven't been saved.", "Discard", () => {
+    confirm(tr("Discard changes?"), tr("Your edits to this item haven't been saved."), tr("Discard"), () => {
       edDirty = false;
       navRoot(route);
     });
@@ -713,11 +723,13 @@ function navRoot(route: string): void {
 
 function sideItem(icon: string, label: string, route: string, badgeCount: number): Widget {
   const on = (navStack[0] ?? "") === route;
-  const r = hrow(10);
-  setPadding(r, 7, 10, 7, 10);
-  setCornerRadius(r, 8);
-  put(r, symbol(icon, 16, on ? BRAND_INK : MUTED));
-  put(r, grow(text(label, 14, on ? 600 : 500, on ? INK : BODY, 1)));
+  const r = hrow(isPad ? 12 : 10);
+  // iPad: 44 pt rows (touch); desktop: compact pointer rows.
+  if (isPad) setPadding(r, 11, 12, 11, 12);
+  else setPadding(r, 7, 10, 7, 10);
+  setCornerRadius(r, isPad ? 10 : 8);
+  put(r, symbol(icon, isPad ? 19 : 16, on ? BRAND_INK : MUTED));
+  put(r, grow(text(label, isPad ? 17 : 14, on ? 600 : 500, on ? INK : BODY, 1)));
   if (badgeCount > 0) put(r, pill(String(badgeCount), K_DANGER));
   const rest: Rgba = on ? SURFACE3 : [0, 0, 0, 0];
   bg(r, rest);
@@ -726,24 +738,24 @@ function sideItem(icon: string, label: string, route: string, badgeCount: number
   return r;
 }
 function sideLabel(t: string): Widget {
-  const box = HStack(0, [text(t.toUpperCase(), 11, 600, FAINT, 1)]);
-  setPadding(box, 16, 10, 4, 10);
+  const box = HStack(0, [text(t.toUpperCase(), isPad ? 12 : 11, 600, FAINT, 1)]);
+  setPadding(box, isPad ? 20 : 16, isPad ? 12 : 10, isPad ? 6 : 4, 10);
   return box;
 }
 
 function siteMenu(): void {
-  const labels: string[] = ["Visit website"];
+  const labels: string[] = [tr("Visit website")];
   const handlers: (() => void)[] = [() => openURL(api.getBaseUrl())];
   const sites = store.loadSites();
   for (let i = 0; i < sites.length; i++) {
     const s = sites[i];
     if (!s || s.baseUrl === api.getBaseUrl()) continue;
-    labels.push(`Switch to ${siteName(s.baseUrl)}`);
+    labels.push(tr("Switch to {site}", { site: siteName(s.baseUrl) }));
     handlers.push(() => switchSite(s));
   }
-  labels.push("Add a site");
+  labels.push(tr("Add a site"));
   handlers.push(() => addAnotherSite());
-  labels.push("Sign out");
+  labels.push(tr("Sign out"));
   handlers.push(() => {
     void doSignOut();
   });
@@ -754,37 +766,37 @@ function paintSidebar(): void {
   widgetClearChildren(sidebar);
   const brand = hrow(10);
   setPadding(brand, 4, 8, 14, 8);
-  put(brand, logoMark(32));
+  put(brand, logoMark(isPad ? 38 : 32));
   const bt = column(0);
-  put(bt, text(siteName(api.getBaseUrl()), 14, 700, INK, 1));
-  put(bt, text("Skelpo CMS", 12, 500, MUTED, 1));
+  put(bt, text(siteName(api.getBaseUrl()), isPad ? 17 : 14, 700, INK, 1));
+  put(bt, text("Skelpo CMS", isPad ? 14 : 12, 500, MUTED, 1));
   put(brand, grow(bt));
   put(brand, symbol("chevron.up.chevron.down", 12, FAINT));
   setCornerRadius(brand, 10);
   onTap(brand, () => siteMenu());
   hoverTint(brand, [0, 0, 0, 0]);
   add(sidebar, brand);
-  add(sidebar, sideItem("house", "Home", R_HOME, 0));
-  add(sidebar, sideItem("doc.text", "Content", R_TYPES, 0));
-  add(sidebar, sideItem("photo.on.rectangle", "Media", R_MEDIA, 0));
-  add(sidebar, sideItem("tray", "Inbox", R_FORMS, 0));
+  add(sidebar, sideItem("house", tr("Home"), R_HOME, 0));
+  add(sidebar, sideItem("doc.text", tr("Content"), R_TYPES, 0));
+  add(sidebar, sideItem("photo.on.rectangle", tr("Media"), R_MEDIA, 0));
+  add(sidebar, sideItem("tray", tr("Inbox"), R_FORMS, 0));
   const site: Widget[] = [];
-  if (can("manageMenus")) site.push(sideItem("list.bullet.rectangle", "Menus", R_MENUS, 0));
-  if (can("manageRedirects")) site.push(sideItem("arrow.triangle.branch", "Redirects", R_REDIRECTS, 0));
-  if (can("manageSettings")) site.push(sideItem("gearshape", "Settings", R_SETTINGS, 0));
-  if (can("manageUsers")) site.push(sideItem("person.2", "Team", R_USERS, 0));
+  if (can("manageMenus")) site.push(sideItem("list.bullet.rectangle", tr("Menus"), R_MENUS, 0));
+  if (can("manageRedirects")) site.push(sideItem("arrow.triangle.branch", tr("Redirects"), R_REDIRECTS, 0));
+  if (can("manageSettings")) site.push(sideItem("gearshape", tr("Settings"), R_SETTINGS, 0));
+  if (can("manageUsers")) site.push(sideItem("person.2", tr("Team"), R_USERS, 0));
   if (site.length > 0) {
-    add(sidebar, sideLabel("Website"));
+    add(sidebar, sideLabel(tr("Website")));
     for (let i = 0; i < site.length; i++) {
       const w = site[i];
       if (w) add(sidebar, w);
     }
   }
   const dev: Widget[] = [];
-  if (can("manageSettings")) dev.push(sideItem("bolt", "Webhooks", R_WEBHOOKS, 0));
-  if (can("manageJobs")) dev.push(sideItem("clock.arrow.circlepath", "Background jobs", R_JOBS, hJobsBad));
+  if (can("manageSettings")) dev.push(sideItem("bolt", tr("Webhooks"), R_WEBHOOKS, 0));
+  if (can("manageJobs")) dev.push(sideItem("clock.arrow.circlepath", tr("Background jobs"), R_JOBS, hJobsBad));
   if (dev.length > 0) {
-    add(sidebar, sideLabel("Developer"));
+    add(sidebar, sideLabel(tr("Developer")));
     for (let i = 0; i < dev.length; i++) {
       const w = dev[i];
       if (w) add(sidebar, w);
@@ -796,10 +808,10 @@ function paintSidebar(): void {
     const u = hrow(10);
     setPadding(u, 8, 8, 8, 8);
     setCornerRadius(u, 10);
-    put(u, avatar(who.user.displayName, who.user.email, 30));
+    put(u, avatar(who.user.displayName, who.user.email, isPad ? 36 : 30));
     const ut = column(0);
-    put(ut, text(who.user.displayName, 13, 600, INK, 1));
-    put(ut, text(who.user.role.label, 12, 400, MUTED, 1));
+    put(ut, text(who.user.displayName, isPad ? 15 : 13, 600, INK, 1));
+    put(ut, text(who.user.role.label, isPad ? 13 : 12, 400, MUTED, 1));
     put(u, grow(ut));
     const rest: Rgba = (navStack[0] ?? "") === R_ACCOUNT ? SURFACE3 : [0, 0, 0, 0];
     bg(u, rest);
@@ -840,7 +852,7 @@ function setDesktopHeader(eyebrow: string, title: string, trailing: Widget[]): v
   setPadding(header, 18, 32, 16, 28);
   const r = hrow(14);
   if (navStack.length > 1) {
-    const back = softTile("chevron.left", INK, SURFACE2, 34, true);
+    const back = softTile("chevron.left", INK, SURFACE2, isPad ? 40 : 34, true);
     onTap(back, () => goBack());
     put(r, back);
   }
@@ -854,8 +866,8 @@ function setDesktopHeader(eyebrow: string, title: string, trailing: Widget[]): v
     }
     crumb = parts.join("  ›  ");
   }
-  if (crumb.length > 0) put(texts, text(crumb, 13, 500, MUTED, 1));
-  put(texts, text(title, navStack.length > 1 ? 22 : 26, 700, INK, 1));
+  if (crumb.length > 0) put(texts, text(crumb, isPad ? 15 : 13, 500, MUTED, 1));
+  put(texts, text(title, navStack.length > 1 ? (isPad ? 26 : 22) : isPad ? 32 : 26, 700, INK, 1));
   put(r, grow(texts));
   put(r, Spacer());
   const right = hrow(8);
@@ -870,7 +882,7 @@ function setDesktopHeader(eyebrow: string, title: string, trailing: Widget[]): v
 }
 
 function setLargeHeader(eyebrow: string, title: string, trailing: Widget[], onTitleTap: (() => void) | null = null): void {
-  if (isDesktop) {
+  if (isWide) {
     setDesktopHeader(eyebrow, title, trailing);
     return;
   }
@@ -898,7 +910,7 @@ function setLargeHeader(eyebrow: string, title: string, trailing: Widget[], onTi
 
 /** Pushed-screen header: back button, centred title, trailing actions. */
 function setBarHeader(title: string, trailing: Widget[]): void {
-  if (isDesktop) {
+  if (isWide) {
     setDesktopHeader("", title, trailing);
     return;
   }
@@ -910,7 +922,7 @@ function setBarHeader(title: string, trailing: Widget[]): void {
   const left = hrow(2);
   if (navStack.length > 1) {
     const prev = navTitles[navStack.length - 2] ?? "";
-    const backLabel = prev.length > 0 && prev.length <= 11 ? prev : "Back";
+    const backLabel = prev.length > 0 && prev.length <= 11 ? prev : tr("Back");
     put(left, symbol("chevron.left", 19, BRAND_INK));
     put(left, text(backLabel, 17, 400, BRAND_INK, 1));
     setPadding(left, 8, 4, 8, 4);
@@ -942,7 +954,7 @@ function headerIcon(name: string, run: () => void): Widget {
 }
 /** Header action: an icon on phones, a labelled button on desktop. */
 function headerAction(icon: string, label: string, run: () => void): Widget {
-  if (isDesktop) return chipButton(label, icon, B_SECONDARY, run);
+  if (isWide) return chipButton(label, icon, B_SECONDARY, run);
   return iconButton(icon, BRAND_INK, run);
 }
 /** Round tinted icon for large headers (Shopify-style). */
@@ -954,7 +966,7 @@ function circleAction(name: string, run: () => void): Widget {
 
 /** Replace the tab bar with a bar of buttons (editor, forms). */
 function setActions(buttons: Widget[]): void {
-  if (isDesktop) {
+  if (isWide) {
     const right = headerRight;
     if (!right) return;
     for (let i = 0; i < buttons.length; i++) {
@@ -986,7 +998,7 @@ function render(reload: boolean): void {
   const route = currentRoute();
   setNotice("", 0);
   widgetClearChildren(content);
-  setPadding(content, isDesktop ? 24 : 14, GUTTER, isDesktop ? 48 : 36, GUTTER);
+  setPadding(content, isWide ? 24 : 14, GUTTER, isWide ? 48 : 36, GUTTER);
   scrollviewSetOffset(scroll, 0, 0);
   const signedOut = route === R_SIGNIN;
   headerRight = null;
@@ -994,8 +1006,8 @@ function render(reload: boolean): void {
   widgetSetHidden(header, signedOut ? 1 : 0);
   widgetSetHidden(headerRule, signedOut ? 1 : 0);
   widgetSetHidden(actionBar, 1);
-  const writing = route === R_WRITE && !isDesktop;
-  if (isDesktop) {
+  const writing = route === R_WRITE && !isWide;
+  if (isWide) {
     widgetSetHidden(sidebar, signedOut ? 1 : 0);
     widgetSetHidden(sideRule, signedOut ? 1 : 0);
     if (!signedOut) paintSidebar();
@@ -1049,9 +1061,9 @@ let signInBusy = false;
 let signInMessage = "";
 
 function screenSignIn(): void {
-  setPadding(content, isDesktop ? 72 : 0, 0, 40, 0);
+  setPadding(content, isWide ? 72 : 0, 0, 40, 0);
   const hero = column(0);
-  if (isDesktop) widgetSetHidden(hero, 1);
+  if (isWide) widgetSetHidden(hero, 1);
   // Vertical gradient (direction < 0.5) so its top matches the status-bar strip.
   widgetSetBackgroundGradient(hero, BRAND[0], BRAND[1], BRAND[2], 1, BRAND_DEEP[0], BRAND_DEEP[1], BRAND_DEEP[2], 1, 0);
   setPadding(hero, 28, 24, 30, 24);
@@ -1060,24 +1072,24 @@ function screenSignIn(): void {
   const t = text("Skelpo CMS", 30, 700, WHITE, 1);
   put(hero, t);
   put(hero, gap(6));
-  add(hero, text("Your website in your pocket. Edit pages, photos and messages from anywhere.", 16, 400, [1, 1, 1, 0.9], 0));
-  if (!isDesktop) add(content, hero);
+  add(hero, text(tr("Your website in your pocket. Edit pages, photos and messages from anywhere."), 16, 400, [1, 1, 1, 0.9], 0));
+  if (!isWide) add(content, hero);
 
   const body = column(10);
   setPadding(body, 6, PAD, 0, PAD);
-  if (isDesktop) {
-    // Desktop: a centred card, Shopify-admin style.
+  if (isWide) {
+    // Desktop and iPad: a centred card, Shopify-admin style.
     const brand = centerColumn(10);
     put(brand, logoMark(60));
     put(brand, gap(4));
-    put(brand, text("Sign in to Skelpo CMS", 26, 700, INK, 1));
-    put(brand, text("Manage your website's pages, media and messages.", 15, 400, MUTED, 1));
+    put(brand, text(tr("Sign in to Skelpo CMS"), 26, 700, INK, 1));
+    put(brand, text(tr("Manage your website's pages, media and messages."), 15, 400, MUTED, 1));
     put(brand, gap(8));
     add(body, brand);
   }
   const saved = store.loadSites();
   if (saved.length > 0) {
-    add(body, groupLabel("Continue"));
+    add(body, groupLabel(tr("Continue")));
     const rows: Widget[] = [];
     for (let i = 0; i < saved.length; i++) {
       const site = saved[i];
@@ -1090,13 +1102,13 @@ function screenSignIn(): void {
     }
     add(body, group(rows, 66));
   }
-  add(body, groupLabel(saved.length > 0 ? "Add a site" : "Sign in"));
+  add(body, groupLabel(saved.length > 0 ? tr("Add a site") : tr("Sign in")));
   const form = card(16, 14);
   if (signInMessage.length > 0) add(form, banner(K_DANGER, "exclamationmark.circle.fill", signInMessage));
   add(
     form,
     field(
-      "Website",
+      tr("Website"),
       null,
       input("www.example.com", inUrl, false, "globe", (s: string) => {
         inUrl = s;
@@ -1107,9 +1119,9 @@ function screenSignIn(): void {
   add(
     form,
     field(
-      "Email",
+      tr("Email"),
       null,
-      input("you@example.com", inEmail, false, "envelope", (s: string) => {
+      input(tr("you@example.com"), inEmail, false, "envelope", (s: string) => {
         inEmail = s;
       }),
       "",
@@ -1118,9 +1130,9 @@ function screenSignIn(): void {
   add(
     form,
     field(
-      "Password",
+      tr("Password"),
       null,
-      input("Password", inPassword, true, "lock", (s: string) => {
+      input(tr("Password"), inPassword, true, "lock", (s: string) => {
         inPassword = s;
       }),
       "",
@@ -1130,29 +1142,29 @@ function screenSignIn(): void {
     add(
       form,
       field(
-        "Authenticator code",
+        tr("Authenticator code"),
         null,
         input("123 456", inTotp, false, "number", (s: string) => {
           inTotp = s;
         }),
-        "The 6-digit code from your authenticator app.",
+        tr("The 6-digit code from your authenticator app."),
       ),
     );
   }
   add(
     form,
-    button(signInBusy ? "Signing in…" : "Sign in", "", B_PRIMARY, 52, () => {
+    button(signInBusy ? tr("Signing in…") : tr("Sign in"), "", B_PRIMARY, 52, () => {
       void doSignIn();
     }),
   );
   add(body, form);
-  const note = text("Works with every website that runs Skelpo CMS. Your sign-in is stored in this device's keychain.", 13, 400, MUTED, 0);
+  const note = text(tr("Works with every website that runs Skelpo CMS. Your sign-in is stored in this device's keychain."), 13, 400, MUTED, 0);
   textSetTextAlignment(note, 2);
   const noteBox = HStack(0, [note]);
   setPadding(noteBox, 8, 20, 0, 20);
   widgetMatchParentWidth(note);
   add(body, noteBox);
-  if (isDesktop) {
+  if (isWide) {
     const wrap = centerColumn(0);
     put(wrap, fixed(body, 460, 0));
     add(content, wrap);
@@ -1166,13 +1178,13 @@ async function doSignIn(): Promise<void> {
   const url = api.normalizeBaseUrl(inUrl);
   const email = inEmail.trim().toLowerCase();
   if (url.length === 0 || email.length === 0 || inPassword.length === 0) {
-    signInMessage = "Enter the website address, your email and your password.";
+    signInMessage = tr("Enter the website address, your email and your password.");
     haptic("error");
     render(false);
     return;
   }
   if (signInNeedsTotp && inTotp.trim().length === 0) {
-    signInMessage = "Enter the 6-digit code from your authenticator app.";
+    signInMessage = tr("Enter the 6-digit code from your authenticator app.");
     haptic("error");
     render(false);
     return;
@@ -1197,11 +1209,11 @@ async function doSignIn(): Promise<void> {
     if (api.isTotpRequired(e)) {
       const wasAsking = signInNeedsTotp;
       signInNeedsTotp = true;
-      signInMessage = wasAsking ? "That code wasn't accepted. Try the current one." : "This account uses two-factor sign-in. Enter your authenticator code.";
+      signInMessage = wasAsking ? tr("That code wasn't accepted. Try the current one.") : tr("This account uses two-factor sign-in. Enter your authenticator code.");
     } else if (e instanceof ApiError && e.status === 401) {
-      signInMessage = "Email or password is incorrect.";
+      signInMessage = tr("Email or password is incorrect.");
     } else if (e instanceof ApiError && e.status === 404) {
-      signInMessage = `No Skelpo CMS found at ${hostOf(url)}. Check the address, or ask your developer to expose /api/v1.`;
+      signInMessage = tr("No Skelpo CMS found at {host}. Check the address, or ask your developer to expose /api/v1.", { host: hostOf(url) });
     } else {
       signInMessage = errorMessage(e);
     }
@@ -1226,7 +1238,7 @@ async function resumeSite(site: store.SavedSite): Promise<void> {
       store.removeSite(site.baseUrl);
       inUrl = site.baseUrl;
       inEmail = site.email;
-      signInMessage = "That session has expired. Sign in again.";
+      signInMessage = tr("That session has expired. Sign in again.");
       api.setSessionToken(null);
       render(false);
       return;
@@ -1272,6 +1284,11 @@ async function startSession(): Promise<void> {
 async function devNavigate(): Promise<void> {
   const tab = devEnv("SKELPO_DEV_TAB");
   if (tab.length > 0) switchTab(Number(tab));
+  // _ACTION=upload opens the photo picker, _ACTION=share the share sheet
+  // (checks the native pickers without a UI driver).
+  const action = devEnv("SKELPO_DEV_ACTION");
+  if (action === "upload") setTimeout(() => startUpload(), 1500);
+  else if (action === "share") setTimeout(() => shareUrl(api.getBaseUrl(), siteName(api.getBaseUrl())), 1500);
   const typeSlug = devEnv("SKELPO_DEV_TYPE");
   if (typeSlug.length === 0) return;
   try {
@@ -1281,6 +1298,7 @@ async function devNavigate(): Promise<void> {
   }
   const t = typeBySlug(typeSlug);
   if (!t) return;
+  if (activeTab !== 1) switchTab(1);
   openType(t);
   if (devEnv("SKELPO_DEV_EDIT") !== "1") return;
   const page = await api.listContent({ type: t.slug, status: "published", limit: 1 });
@@ -1291,7 +1309,13 @@ async function devNavigate(): Promise<void> {
   const wf = devEnv("SKELPO_DEV_WRITE");
   if (wf.length > 0) {
     const ed = mdEditorFor(wf);
-    openWriter(wf, wf);
+    let label = wf;
+    const defs = t.fieldsSchema.fields;
+    for (let i = 0; i < defs.length; i++) {
+      const d = defs[i];
+      if (d && d.name === wf && d.label) label = d.label;
+    }
+    openWriter(wf, label);
     if (devEnv("SKELPO_DEV_FOCUS") === "1") setTimeout(() => focusEditor(ed), 800);
   }
 }
@@ -1328,7 +1352,7 @@ function endSession(message: string): void {
 }
 
 async function doSignOut(): Promise<void> {
-  setNotice("Signing out…", 0);
+  setNotice(tr("Signing out…"), 0);
   await api.logout();
   endSession("");
 }
@@ -1363,7 +1387,7 @@ function showSplash(baseUrl: string): void {
   put(v, gap(6));
   put(v, text("Skelpo CMS", 22, 700, INK, 1));
   put(v, ProgressView());
-  put(v, text(`Connecting to ${siteName(baseUrl)}…`, 14, 400, MUTED, 1));
+  put(v, text(tr("Connecting to {site}…", { site: siteName(baseUrl) }), 14, 400, MUTED, 1));
   add(content, v);
 }
 
@@ -1393,7 +1417,7 @@ async function boot(): Promise<void> {
     inEmail = site.email;
     if (e instanceof ApiError && e.status === 401) {
       store.removeSite(site.baseUrl);
-      signInMessage = "Your session has expired. Sign in again.";
+      signInMessage = tr("Your session has expired. Sign in again.");
     } else {
       // Offline or server down: keep the saved session so it can be retried.
       signInMessage = errorMessage(e);
@@ -1617,7 +1641,7 @@ function screenHome(seq: number, reload: boolean): void {
   const who = me;
   const name = who ? firstName(who.user.displayName) : "";
   const trailing: Widget[] = [];
-  if (who && !isDesktop) {
+  if (who && !isWide) {
     const av = avatar(who.user.displayName, who.user.email, 38);
     onTap(av, () => go(R_ACCOUNT));
     trailing.push(av);
@@ -1719,7 +1743,7 @@ async function loadHome(seq: number): Promise<void> {
   hJobsBad = 0;
   if (stats) hJobsBad = (stats["failed"] ?? 0) + (stats["dead"] ?? 0);
   homeLoaded = true;
-  if (isDesktop && me) paintSidebar(); // failed-jobs badge
+  if (isWide && me) paintSidebar(); // failed-jobs badge
   if (!isCurrent(seq)) return;
   widgetClearChildren(content);
   drawHome();
@@ -1741,30 +1765,31 @@ function homeHero(loading: boolean): Widget {
   const top = hrow(12);
   put(top, softTile("globe", WHITE, [1, 1, 1, 0.2], 40, false));
   const tx = column(1);
-  put(tx, text("Your website", 13, 600, [1, 1, 1, 0.82], 1));
+  put(tx, text(tr("Your website"), 13, 600, [1, 1, 1, 0.82], 1));
   put(tx, text(hostOf(api.getBaseUrl()), 19, 700, WHITE, 1));
   put(top, grow(tx));
   add(hero, top);
   put(hero, gap(6));
-  let summary = "Checking what needs your attention…";
+  let summary = tr("Checking what needs your attention…");
   if (!loading) {
     const parts: string[] = [];
     const waiting = hDraftCount + hReviewCount;
-    if (waiting > 0) parts.push(`${waiting}${hDraftsCapped ? "+" : ""} ${waiting === 1 ? "draft" : "drafts"} waiting`);
+    const n = `${waiting}${hDraftsCapped ? "+" : ""}`;
+    if (waiting > 0) parts.push(waiting === 1 ? tr("{n} draft waiting", { n }) : tr("{n} drafts waiting", { n }));
     const fresh = newThisWeek();
-    if (fresh > 0) parts.push(`${plural(fresh, "new message", "new messages")} this week`);
-    summary = parts.length > 0 ? parts.join(" · ") : "Everything is published and your inbox is clear.";
+    if (fresh > 0) parts.push(plural(fresh, "{n} new message this week", "{n} new messages this week"));
+    summary = parts.length > 0 ? parts.join(" · ") : tr("Everything is published and your inbox is clear.");
   }
   add(hero, text(summary, 15, 500, [1, 1, 1, 0.95], 0));
   put(hero, gap(10));
-  const visit = button("Visit website", "safari", B_ON_BRAND, 40, () => openURL(api.getBaseUrl()));
-  const share = button(isDesktop ? "Copy link" : "Share", isDesktop ? "link" : "square.and.arrow.up", B_GHOST_ON_BRAND, 40, () => {
+  const visit = button(tr("Visit website"), "safari", B_ON_BRAND, 40, () => openURL(api.getBaseUrl()));
+  const share = button(isDesktop ? tr("Copy link") : tr("Share"), isDesktop ? "link" : "square.and.arrow.up", B_GHOST_ON_BRAND, 40, () => {
     if (isDesktop) {
       clipboardWrite(api.getBaseUrl());
-      setNotice("Link copied", 2);
+      setNotice(tr("Link copied"), 2);
     } else shareUrl(api.getBaseUrl(), siteName(api.getBaseUrl()));
   });
-  if (isDesktop) {
+  if (isWide) {
     const r = hrow(10);
     widgetSetHugging(visit, 750);
     widgetSetHugging(share, 750);
@@ -1793,9 +1818,13 @@ function tileGrid(tiles: Widget[], cols: number, spacing: number): Widget {
   return v;
 }
 function statsGrid(tiles: Widget[]): Widget {
-  return tileGrid(tiles, isDesktop ? 4 : 2, isDesktop ? 16 : 12);
+  return tileGrid(tiles, isWide ? 4 : 2, isWide ? 16 : 12);
 }
-/** Two columns on desktop (main grows, side is fixed); stacked on phones. */
+/**
+ * Two columns on desktop (main grows, side is fixed); stacked on phones and
+ * iPad, where a fixed side column would squeeze the main one (an iPad
+ * portrait window has ~700 pt next to the sidebar, less in Split View).
+ */
 function twoColumns(main: Widget, side: Widget, sideWidth: number): Widget {
   if (!isDesktop) {
     const v = column(14);
@@ -1851,17 +1880,17 @@ function drawHome(): void {
   const tiles: Widget[] = [];
   const waiting = hDraftCount;
   tiles.push(
-    statTile("pencil.line", TILE_ORANGE, `${waiting}${hDraftsCapped ? "+" : ""}`, "Drafts", () => {
+    statTile("pencil.line", TILE_ORANGE, `${waiting}${hDraftsCapped ? "+" : ""}`, tr("Drafts"), () => {
       switchTab(1);
     }),
   );
-  tiles.push(statTile("eye", TILE_PURPLE, String(hReviewCount), "In review", () => switchTab(1)));
-  tiles.push(statTile("tray.full", TILE_BLUE, String(newThisWeek()), "New messages", () => switchTab(3)));
-  tiles.push(statTile("photo.on.rectangle", TILE_GREEN, String(cMedia.length), "Media files", () => switchTab(2)));
+  tiles.push(statTile("eye", TILE_PURPLE, String(hReviewCount), tr("In review"), () => switchTab(1)));
+  tiles.push(statTile("tray.full", TILE_BLUE, String(newThisWeek()), tr("New messages"), () => switchTab(3)));
+  tiles.push(statTile("photo.on.rectangle", TILE_GREEN, String(cMedia.length), tr("Media files"), () => switchTab(2)));
   add(content, statsGrid(tiles));
 
   if (hJobsBad > 0) {
-    const b = banner(K_DANGER, "exclamationmark.triangle.fill", `${plural(hJobsBad, "background job", "background jobs")} failed. Tap to review.`);
+    const b = banner(K_DANGER, "exclamationmark.triangle.fill", plural(hJobsBad, "{n} background job failed. Tap to review.", "{n} background jobs failed. Tap to review."));
     onTap(b, () => go(R_JOBS));
     add(content, b);
   }
@@ -1872,11 +1901,11 @@ function drawHome(): void {
     const t = creatable[i];
     if (!t) continue;
     const c = typeColor(t.slug);
-    quick.push(quickAction(typeSymbol(t, t.slug), c, `New ${t.labelSingular}`, () => startNewItem(t)));
+    quick.push(quickAction(typeSymbol(t, t.slug), c, tr("New {type}", { type: t.labelSingular }), () => startNewItem(t)));
   }
-  if (can("manageMedia")) quick.push(quickAction("camera", TILE_GREEN, "Upload photo", () => startUpload()));
+  if (can("manageMedia")) quick.push(quickAction("camera", TILE_GREEN, tr("Upload photo"), () => startUpload()));
   if (quick.length > 0) {
-    add(content, sectionHeader("Quick actions", "", null));
+    add(content, sectionHeader(tr("Quick actions"), "", null));
     const r = HStack(12, []);
     stackSetDistribution(r, 1);
     for (let i = 0; i < quick.length; i++) {
@@ -1890,7 +1919,7 @@ function drawHome(): void {
   const right = column(14);
   add(
     left,
-    sectionHeader("Continue editing", "All content", () => {
+    sectionHeader(tr("Continue editing"), tr("All content"), () => {
       switchTab(1);
     }),
   );
@@ -1899,8 +1928,8 @@ function drawHome(): void {
     const r = hrow(12);
     put(r, softTile("checkmark", OK_FG, tintFill(TILE_GREEN), 38, true));
     const tx = column(2);
-    put(tx, text("All caught up", 16, 600, INK, 1));
-    add(tx, caption("No drafts are waiting to be published."));
+    put(tx, text(tr("All caught up"), 16, 600, INK, 1));
+    add(tx, caption(tr("No drafts are waiting to be published.")));
     put(r, grow(tx));
     add(c, r);
     add(left, c);
@@ -1919,7 +1948,7 @@ function drawHome(): void {
   if (cForms.length > 0) {
     add(
       right,
-      sectionHeader("Latest messages", "Inbox", () => {
+      sectionHeader(tr("Latest messages"), tr("Inbox"), () => {
         switchTab(3);
       }),
     );
@@ -1930,7 +1959,7 @@ function drawHome(): void {
     }
     if (rows.length === 0) {
       const c = card(16, 0);
-      add(c, caption("No messages yet. Form submissions from your website appear here."));
+      add(c, caption(tr("No messages yet. Form submissions from your website appear here.")));
       add(right, c);
     } else {
       add(right, group(rows, 68));
@@ -1943,7 +1972,7 @@ function drawHome(): void {
 // ---------- content: types ----------------------------------------------
 
 function screenTypes(seq: number, reload: boolean): void {
-  setLargeHeader("", "Content", []);
+  setLargeHeader("", tr("Content"), []);
   if (cTypesLoaded) drawTypes();
   else showSkeleton(seq, 6, true);
   if (!cTypesLoaded || reload) {
@@ -1971,7 +2000,7 @@ function typeRow(t: ContentType): Widget {
 function drawTypes(): void {
   const types = visibleTypes();
   if (types.length === 0) {
-    add(content, emptyState("square.stack", "No content types yet", "A developer defines content types in the CMS. They show up here once they exist.", "", null));
+    add(content, emptyState("square.stack", tr("No content types yet"), tr("A developer defines content types in the CMS. They show up here once they exist."), "", null));
     return;
   }
   const pages: Widget[] = [];
@@ -1983,11 +2012,11 @@ function drawTypes(): void {
     else data.push(typeRow(t));
   }
   if (pages.length > 0) {
-    add(content, groupLabel("Pages & posts"));
+    add(content, groupLabel(tr("Pages & posts")));
     add(content, group(pages, 62));
   }
   if (data.length > 0) {
-    add(content, groupLabel("Collections"));
+    add(content, groupLabel(tr("Collections")));
     add(content, group(data, 62));
   }
 }
@@ -2012,9 +2041,9 @@ function screenContent(seq: number, reload: boolean): void {
     return;
   }
   const allowCreate = canType(t.slug, "create");
-  setBarHeader(t.labelPlural, allowCreate ? [headerAction("plus", `New ${t.labelSingular}`, () => startNewItem(t))] : []);
+  setBarHeader(t.labelPlural, allowCreate ? [headerAction("plus", tr("New {type}", { type: t.labelSingular }), () => startNewItem(t))] : []);
 
-  const search = searchField(`Search ${t.labelPlural.toLowerCase()}`, contentFilter, (s: string) => {
+  const search = searchField(tr("Search {types}", { types: noun(t.labelPlural) }), contentFilter, (s: string) => {
     contentFilter = s;
     drawContentRows();
   });
@@ -2032,7 +2061,7 @@ function screenContent(seq: number, reload: boolean): void {
     };
     localeSeg = labels.length <= 5 ? segmented(labels, at, onPick) : chips(labels, [at], false, (sel: number[]) => onPick(sel[0] ?? 0));
   }
-  if (isDesktop) {
+  if (isWide) {
     // One toolbar row: search | status | language.
     const bar = hrow(12);
     put(bar, grow(search));
@@ -2130,8 +2159,8 @@ function drawContentRows(): void {
   }
   if (cContentHasMore && needle.length === 0) {
     rows.push(
-      actionItem(null, "Load more", BRAND_INK, () => {
-        setNotice("Loading more…", 0);
+      actionItem(null, tr("Load more"), BRAND_INK, () => {
+        setNotice(tr("Loading more…"), 0);
         const seq = renderSeq;
         void loadContent(seq, true).then(() => {
           if (isCurrent(seq)) setNotice("", 0);
@@ -2141,20 +2170,26 @@ function drawContentRows(): void {
   }
   if (rows.length === 0) {
     if (needle.length > 0) {
-      add(box, emptyState("magnifyingglass", "No matches", `Nothing in ${t.labelPlural} matches “${contentFilter.trim()}”.`, "", null));
+      add(box, emptyState("magnifyingglass", tr("No matches"), tr("Nothing in {types} matches “{q}”.", { types: t.labelPlural, q: contentFilter.trim() }), "", null));
       return;
     }
-    const what = (STATUS_LABELS[contentStatus] ?? "").toLowerCase();
     const allowCreate = canType(t.slug, "create");
-    const msg = contentStatus === 0 ? `Nothing is live yet. Publish a draft and it appears here.` : `There are no ${what} ${t.labelPlural.toLowerCase()} right now.`;
+    const types = noun(t.labelPlural);
+    const titles = [tr("No live {types}", { types }), tr("No draft {types}", { types }), tr("No {types} in review", { types }), tr("No archived {types}", { types })];
+    const msgs = [
+      tr("Nothing is live yet. Publish a draft and it appears here."),
+      tr("Drafts you create or save appear here."),
+      tr("Items submitted for review appear here."),
+      tr("Archived items appear here and can still be opened."),
+    ];
     add(
       box,
-      emptyState(typeSymbol(t, t.slug), `No ${what} ${t.labelPlural.toLowerCase()}`, msg, allowCreate ? `New ${t.labelSingular}` : "", allowCreate ? () => startNewItem(t) : null),
+      emptyState(typeSymbol(t, t.slug), titles[contentStatus] ?? "", msgs[contentStatus] ?? "", allowCreate ? tr("New {type}", { type: t.labelSingular }) : "", allowCreate ? () => startNewItem(t) : null),
     );
     return;
   }
   add(box, group(rows, 74));
-  if (cContent.length > 0) add(box, footnote(`${plural(cContent.length, "item", "items")}${cContentHasMore ? " so far" : ""}`));
+  if (cContent.length > 0) add(box, footnote(cContentHasMore ? tr("{n} items so far", { n: cContent.length }) : plural(cContent.length, "{n} item", "{n} items")));
 }
 
 // ---------- content: new item -------------------------------------------
@@ -2177,27 +2212,27 @@ function screenNewItem(): void {
     leave();
     return;
   }
-  setBarHeader(`New ${t.labelSingular}`, []);
+  setBarHeader(tr("New {type}", { type: t.labelSingular }), []);
   const head = hrow(12);
   put(head, typeTile(t.slug, 44));
   const tx = column(2);
-  put(tx, text(`New ${t.labelSingular}`, 18, 700, INK, 1));
-  add(tx, caption("Starts as a draft. Nothing goes live until you publish."));
+  put(tx, text(tr("New {type}", { type: t.labelSingular }), 18, 700, INK, 1));
+  add(tx, caption(tr("Starts as a draft. Nothing goes live until you publish.")));
   put(head, grow(tx));
   setPadding(head, 4, 2, 4, 2);
   add(content, head);
 
   const form = card(16, 16);
-  const addr = text(t.isRoutable ? `Address: ${pathFor(t, newSlugTouched ? newSlug : slugify(newTitle))}` : "", 13, 400, MUTED, 1);
+  const addr = text(t.isRoutable ? tr("Address: {path}", { path: pathFor(t, newSlugTouched ? newSlug : slugify(newTitle)) }) : "", 13, 400, MUTED, 1);
   add(
     form,
     field(
-      "Title",
+      tr("Title"),
       null,
-      input("Title", newTitle, false, "", (s: string) => {
+      input(tr("Title"), newTitle, false, "", (s: string) => {
         newTitle = s;
         if (!newSlugTouched) newSlug = slugify(s);
-        if (t.isRoutable) textSetString(addr, `Address: ${pathFor(t, newSlugTouched ? newSlug : slugify(s))}`);
+        if (t.isRoutable) textSetString(addr, tr("Address: {path}", { path: pathFor(t, newSlugTouched ? newSlug : slugify(s)) }));
       }),
       "",
     ),
@@ -2205,14 +2240,14 @@ function screenNewItem(): void {
   add(
     form,
     field(
-      "URL slug",
+      tr("URL slug"),
       null,
-      input("made-from-the-title", newSlugTouched ? newSlug : "", false, "link", (s: string) => {
+      input(tr("made-from-the-title"), newSlugTouched ? newSlug : "", false, "link", (s: string) => {
         newSlug = s;
         newSlugTouched = s.length > 0;
-        if (t.isRoutable) textSetString(addr, `Address: ${pathFor(t, newSlugTouched ? slugify(s) : slugify(newTitle))}`);
+        if (t.isRoutable) textSetString(addr, tr("Address: {path}", { path: pathFor(t, newSlugTouched ? slugify(s) : slugify(newTitle)) }));
       }),
-      "Leave empty to build it from the title.",
+      tr("Leave empty to build it from the title."),
     ),
   );
   if (t.isRoutable) add(form, addr);
@@ -2220,7 +2255,7 @@ function screenNewItem(): void {
     add(
       form,
       field(
-        "Language",
+        tr("Language"),
         null,
         segmented(localeLabels(), siteLocales.indexOf(newLocale), (i: number) => {
           newLocale = siteLocales[i] ?? defaultLocale;
@@ -2231,7 +2266,7 @@ function screenNewItem(): void {
   }
   add(content, form);
   setActions([
-    button(newBusy ? "Creating…" : "Create draft", "plus", B_PRIMARY, AB_H, () => {
+    button(newBusy ? tr("Creating…") : tr("Create draft"), "plus", B_PRIMARY, AB_H, () => {
       void doCreateItem();
     }),
   ]);
@@ -2243,11 +2278,11 @@ async function doCreateItem(): Promise<void> {
   const title = newTitle.trim();
   const slug = slugify(newSlug.length > 0 ? newSlug : title);
   if (title.length === 0 || slug.length === 0) {
-    setNotice("Give it a title first.", 1);
+    setNotice(tr("Give it a title first."), 1);
     return;
   }
   newBusy = true;
-  setNotice("Creating draft…", 0);
+  setNotice(tr("Creating draft…"), 0);
   try {
     const it = await api.createContent({ type: t.slug, slug, locale: newLocale.length > 0 ? newLocale : defaultLocale, title });
     newBusy = false;
@@ -2333,15 +2368,15 @@ function touch(): void {
   edDirty = true;
   const l = edStateLabel;
   if (l) {
-    textSetString(l, "Unsaved changes");
+    textSetString(l, tr("Unsaved changes"));
     color(l, WARN_FG);
   }
 }
 
 function refreshSeoPreview(): void {
   const title = edSeoTitle.trim().length > 0 ? edSeoTitle.trim() : edTitle.trim();
-  if (seoPrevTitle) textSetString(seoPrevTitle, title.length > 0 ? title : "Page title");
-  if (seoPrevDesc) textSetString(seoPrevDesc, edSeoDesc.trim().length > 0 ? edSeoDesc.trim() : "Add a meta description so search engines show a helpful summary of this page.");
+  if (seoPrevTitle) textSetString(seoPrevTitle, title.length > 0 ? title : tr("Page title"));
+  if (seoPrevDesc) textSetString(seoPrevDesc, edSeoDesc.trim().length > 0 ? edSeoDesc.trim() : tr("Add a meta description so search engines show a helpful summary of this page."));
   if (seoTitleCounter) setCounter(seoTitleCounter, edSeoTitle.trim().length, 1, 70);
   if (seoDescCounter) setCounter(seoDescCounter, edSeoDesc.trim().length, 70, 160);
   if (titleCounter) setCounter(titleCounter, edTitle.trim().length, 1, 70);
@@ -2358,37 +2393,37 @@ function editorMenu(it: ContentItem): void {
   const handlers: (() => void)[] = [];
   const url = publicUrl(it);
   if (url.length > 0 && it.status === "published") {
-    labels.push("View on website");
+    labels.push(tr("View on website"));
     handlers.push(() => openURL(url));
-    labels.push("Share link");
+    labels.push(tr("Share link"));
     handlers.push(() => shareUrl(url, it.title));
-    labels.push("Copy link");
+    labels.push(tr("Copy link"));
     handlers.push(() => {
       clipboardWrite(url);
-      setNotice("Link copied", 2);
+      setNotice(tr("Link copied"), 2);
     });
   }
   if (canType(it.type, "publish") && it.status === "published") {
-    labels.push("Unpublish");
+    labels.push(tr("Unpublish"));
     handlers.push(() =>
-      confirm("Unpublish?", "It is taken off the live site and becomes a draft again.", "Unpublish", () => {
+      confirm(tr("Unpublish?"), tr("It is taken off the live site and becomes a draft again."), tr("Unpublish"), () => {
         void doUnpublish();
       }),
     );
   }
   const allowEdit = canType(it.type, "update") || canType(it.type, "updateOwn");
   if (allowEdit && it.status !== "archived") {
-    labels.push("Archive");
+    labels.push(tr("Archive"));
     handlers.push(() =>
-      confirm("Archive this item?", "It is removed from the live site and moved to Archived, where it can still be opened.", "Archive", () => {
+      confirm(tr("Archive this item?"), tr("It is removed from the live site and moved to Archived, where it can still be opened."), tr("Archive"), () => {
         void doDelete(false);
       }),
     );
   }
   if (canType(it.type, "delete")) {
-    labels.push("Delete permanently");
+    labels.push(tr("Delete permanently"));
     handlers.push(() =>
-      confirm("Delete permanently?", `“${it.title}” will be removed for good. This can't be undone.`, "Delete", () => {
+      confirm(tr("Delete permanently?"), tr("“{title}” will be removed for good. This can't be undone.", { title: it.title }), tr("Delete"), () => {
         void doDelete(true);
       }),
     );
@@ -2406,7 +2441,7 @@ function screenEditor(): void {
   const t = edType;
   const allowEdit = canType(it.type, "update") || canType(it.type, "updateOwn");
   const allowPublish = canType(it.type, "publish");
-  setBarHeader(t ? t.labelSingular : it.type, [headerAction("ellipsis.circle", "More", () => editorMenu(it))]);
+  setBarHeader(t ? t.labelSingular : it.type, [headerAction("ellipsis.circle", tr("More"), () => editorMenu(it))]);
 
   // Summary
   const sum = card(16, 10);
@@ -2414,16 +2449,16 @@ function screenEditor(): void {
   put(top, statusPill(it.status));
   if (siteLocales.length > 1) put(top, tag(it.locale.toUpperCase()));
   put(top, Spacer());
-  const state = text(edDirty ? "Unsaved changes" : `Edited ${relTime(it.updatedAt)}`, 13, 500, edDirty ? WARN_FG : MUTED, 1);
+  const state = text(edDirty ? tr("Unsaved changes") : tr("Edited {when}", { when: relTimeInline(it.updatedAt) }), 13, 500, edDirty ? WARN_FG : MUTED, 1);
   edStateLabel = state;
   put(top, state);
   add(sum, top);
-  add(sum, title2(it.title.length > 0 ? it.title : "Untitled"));
+  add(sum, title2(it.title.length > 0 ? it.title : tr("Untitled")));
   const url = publicUrl(it);
   if (url.length > 0) {
     const link = hrow(6);
     put(link, symbol(it.status === "published" ? "globe" : "eye.slash", 14, it.status === "published" ? BRAND_INK : MUTED));
-    put(link, grow(text(it.status === "published" ? hostOf(url) + (it.url ?? "") : `${it.url ?? ""} · not live`, 14, 500, it.status === "published" ? BRAND_INK : MUTED, 1)));
+    put(link, grow(text(it.status === "published" ? hostOf(url) + (it.url ?? "") : `${it.url ?? ""} · ${tr("not live")}`, 14, 500, it.status === "published" ? BRAND_INK : MUTED, 1)));
     if (it.status === "published") onTap(link, () => openURL(url));
     add(sum, link);
   }
@@ -2433,16 +2468,16 @@ function screenEditor(): void {
   else add(mainCol, sum);
 
   // Basics
-  add(mainCol, groupLabel("Basics"));
+  add(mainCol, groupLabel(tr("Basics")));
   const basics = card(16, 16);
   const tc = counter();
   titleCounter = tc;
   add(
     basics,
     field(
-      "Title",
+      tr("Title"),
       tc,
-      input("Title", edTitle, false, "", (s: string) => {
+      input(tr("Title"), edTitle, false, "", (s: string) => {
         edTitle = s;
         touch();
         refreshSeoPreview();
@@ -2453,13 +2488,13 @@ function screenEditor(): void {
   add(
     basics,
     field(
-      "URL slug",
+      tr("URL slug"),
       null,
       input("slug", edSlug, false, "link", (s: string) => {
         edSlug = s;
         touch();
       }),
-      t && t.isRoutable ? `Address: ${pathFor(t, edSlug)}` : "",
+      t && t.isRoutable ? tr("Address: {path}", { path: pathFor(t, edSlug) }) : "",
     ),
   );
   add(mainCol, basics);
@@ -2467,7 +2502,7 @@ function screenEditor(): void {
   // Schema fields
   const defs = t ? t.fieldsSchema.fields : [];
   if (defs.length > 0) {
-    add(mainCol, groupLabel("Content"));
+    add(mainCol, groupLabel(tr("Content")));
     const fields = card(16, 20);
     for (let i = 0; i < defs.length; i++) {
       const def = defs[i];
@@ -2475,11 +2510,11 @@ function screenEditor(): void {
     }
     add(mainCol, fields);
   } else if (!t) {
-    add(mainCol, banner(K_WARN, "exclamationmark.triangle.fill", "This item's content type couldn't be loaded, so only its title and slug can be edited here."));
+    add(mainCol, banner(K_WARN, "exclamationmark.triangle.fill", tr("This item's content type couldn't be loaded, so only its title and slug can be edited here.")));
   }
 
   // SEO
-  add(sideCol, groupLabel("Search engine listing"));
+  add(sideCol, groupLabel(tr("Search engine listing")));
   const seo = card(16, 16);
   const prev = column(4);
   bg(prev, SURFACE2);
@@ -2505,9 +2540,9 @@ function screenEditor(): void {
   add(
     seo,
     field(
-      "Meta title",
+      tr("Meta title"),
       stc,
-      input("Defaults to the title", edSeoTitle, false, "", (s: string) => {
+      input(tr("Defaults to the title"), edSeoTitle, false, "", (s: string) => {
         edSeoTitle = s;
         touch();
         refreshSeoPreview();
@@ -2520,14 +2555,14 @@ function screenEditor(): void {
   add(
     seo,
     field(
-      "Meta description",
+      tr("Meta description"),
       sdc,
       textArea(edSeoDesc, 104, (s: string) => {
         edSeoDesc = s;
         touch();
         refreshSeoPreview();
       }),
-      "Publishing needs 70–160 characters.",
+      tr("Publishing needs 70–160 characters."),
     ),
   );
   add(sideCol, seo);
@@ -2538,13 +2573,13 @@ function screenEditor(): void {
   const actions: Widget[] = [];
   if (allowEdit) {
     if (allowPublish && it.status !== "published") {
-      actions.push(button("Save", "", B_SECONDARY, AB_H, () => void doSave(false)));
-      actions.push(button("Publish", "paperplane.fill", B_PRIMARY, AB_H, () => void doSave(true)));
+      actions.push(button(tr("Save"), "", B_SECONDARY, AB_H, () => void doSave(false)));
+      actions.push(button(tr("Publish"), "paperplane.fill", B_PRIMARY, AB_H, () => void doSave(true)));
     } else {
-      actions.push(button(it.status === "published" ? "Save changes" : "Save", "", B_PRIMARY, AB_H, () => void doSave(false)));
+      actions.push(button(it.status === "published" ? tr("Save changes") : tr("Save"), "", B_PRIMARY, AB_H, () => void doSave(false)));
     }
   } else if (allowPublish && it.status !== "published") {
-    actions.push(button("Publish", "paperplane.fill", B_PRIMARY, AB_H, () => void doSave(true)));
+    actions.push(button(tr("Publish"), "paperplane.fill", B_PRIMARY, AB_H, () => void doSave(true)));
   }
   if (actions.length > 0) setActions(actions);
 }
@@ -2610,8 +2645,8 @@ function resetMarkdownEditors(): void {
 }
 
 function wordsLine(n: number): string {
-  if (n === 0) return "Empty";
-  return `${plural(n, "word", "words")} · ${Math.max(1, Math.round(n / 200))} min read`;
+  if (n === 0) return tr("Empty");
+  return `${plural(n, "{n} word", "{n} words")} · ${tr("{n} min read", { n: Math.max(1, Math.round(n / 200)) })}`;
 }
 
 function updateWordLabel(name: string): void {
@@ -2626,7 +2661,7 @@ function mdEditorFor(name: string): MarkdownEditor {
   const v = edValues[name];
   const ed = markdownEditor({
     text: typeof v === "string" ? v : "",
-    placeholder: "Start writing… Markdown works: # heading, **bold**, - list",
+    placeholder: tr("Start writing… Markdown works: # heading, **bold**, - list"),
     fontSize: isDesktop ? 15 : 17,
     accent: [BRAND_INK[0], BRAND_INK[1], BRAND_INK[2]],
     toolbar: MD_TOOLBAR,
@@ -2676,7 +2711,7 @@ function markdownField(name: string, title: string, help: string): Widget {
   const words = caption(wordsLine(wordCount(ed)));
   mdWordLabels[name] = words;
 
-  if (isDesktop) {
+  if (isWide) {
     const box = column(0);
     bg(box, SURFACE2);
     setCornerRadius(box, 12);
@@ -2702,17 +2737,17 @@ function markdownField(name: string, title: string, help: string): Widget {
     add(box, divider(0));
     widgetSetHeight(ed.widget, 480);
     add(box, ed.widget);
-    return field(title, tag("MARKDOWN"), box, help.length > 0 ? help : "⌘B bold · ⌘I italic · ⌘K link");
+    return field(title, tag("MARKDOWN"), box, help.length > 0 ? help : tr("⌘B bold · ⌘I italic · ⌘K link"));
   }
 
   const v = edValues[name];
   const md = typeof v === "string" ? v : "";
   const c = card(14, 8);
   const ex = markdownExcerpt(md);
-  add(c, text(ex.length > 0 ? ex : "Tap to start writing", 15, 400, ex.length > 0 ? BODY : FAINT, 3));
+  add(c, text(ex.length > 0 ? ex : tr("Tap to start writing"), 15, 400, ex.length > 0 ? BODY : FAINT, 3));
   const foot = hrow(6);
   put(foot, symbol("square.and.pencil", 14, BRAND_INK));
-  put(foot, grow(text(ex.length > 0 ? "Edit" : "Write", 14, 600, BRAND_INK, 1)));
+  put(foot, grow(text(ex.length > 0 ? tr("Edit") : tr("Write"), 14, 600, BRAND_INK, 1)));
   put(foot, words);
   add(c, foot);
   onTap(c, () => openWriter(name, title));
@@ -2734,7 +2769,7 @@ function screenWrite(): void {
     return;
   }
   setBarHeader(wrTitle, [
-    headerAction(wrPreview ? "pencil" : "eye", wrPreview ? "Edit" : "Preview", () => {
+    headerAction(wrPreview ? "pencil" : "eye", wrPreview ? tr("Edit") : tr("Preview"), () => {
       wrPreview = !wrPreview;
       setPreview(ed, wrPreview);
       render(false);
@@ -2750,7 +2785,7 @@ function screenWrite(): void {
   mdWordLabels[wrField] = words;
   put(status, words);
   put(status, Spacer());
-  put(status, caption(wrPreview ? "Preview" : "Markdown"));
+  put(status, caption(wrPreview ? tr("Preview") : "Markdown"));
   add(writePane, divider(0));
   add(writePane, status);
   if (!wrPreview && getMarkdown(ed).length === 0) setTimeout(() => focusEditor(ed), 350);
@@ -2780,7 +2815,7 @@ function fieldEditor(def: FieldDef): Widget {
   if (def.type === "select") {
     const options = def.validation && def.validation.options ? def.validation.options : [];
     const labels: string[] = [];
-    if (!def.required) labels.push("None");
+    if (!def.required) labels.push(tr("None"));
     for (let i = 0; i < options.length; i++) labels.push(options[i] ?? "");
     const offset = def.required ? 0 : 1;
     const current = typeof value === "string" ? options.indexOf(value) : -1;
@@ -2830,8 +2865,8 @@ function fieldEditor(def: FieldDef): Widget {
       add(
         v,
         buttonRow([
-          button("Replace", "photo", B_TINTED, 40, () => pickImageFor(name, false)),
-          button("Remove", "trash", B_DANGER, 40, () => {
+          button(tr("Replace"), "photo", B_TINTED, 40, () => pickImageFor(name, false)),
+          button(tr("Remove"), "trash", B_DANGER, 40, () => {
             edValues[name] = null;
             touch();
             redrawEditor();
@@ -2844,7 +2879,7 @@ function fieldEditor(def: FieldDef): Widget {
       setCornerRadius(ph, 12);
       setPadding(ph, 28, 16, 28, 16);
       put(ph, symbol("photo.badge.plus", 30, MUTED));
-      put(ph, text("Choose from library", 14, 600, BODY, 1));
+      put(ph, text(tr("Choose from library"), 14, 600, BODY, 1));
       onTap(ph, () => pickImageFor(name, false));
       add(v, ph);
     }
@@ -2862,7 +2897,7 @@ function fieldEditor(def: FieldDef): Widget {
         const index = i;
         const th = mediaThumb(mid, 72) ?? softTile("doc", MUTED, SURFACE2, 72, false);
         onTap(th, () => {
-          confirm("Remove from gallery?", "The file stays in the media library.", "Remove", () => {
+          confirm(tr("Remove from gallery?"), tr("The file stays in the media library."), tr("Remove"), () => {
             const next = ids.slice(0);
             next.splice(index, 1);
             edRaw[name] = prettyJson(next);
@@ -2879,17 +2914,19 @@ function fieldEditor(def: FieldDef): Widget {
       }
       add(rows, strip);
       if (ids.length > 0) add(v, rows);
-      add(v, button(ids.length > 0 ? "Add image" : "Add images from library", "plus", B_TINTED, 40, () => pickImageFor(name, true)));
-      return field(`${title}${ids.length > 0 ? ` · ${ids.length}` : ""}`, null, v, help.length > 0 ? help : ids.length > 0 ? "Tap an image to remove it." : "");
+      add(v, button(ids.length > 0 ? tr("Add image") : tr("Add images from library"), "plus", B_TINTED, 40, () => pickImageFor(name, true)));
+      return field(`${title}${ids.length > 0 ? ` · ${ids.length}` : ""}`, null, v, help.length > 0 ? help : ids.length > 0 ? tr("Tap an image to remove it.") : "");
     }
   }
   if (isJsonField(def)) {
     const hint =
       def.type === "relation"
-        ? `Ids of linked ${def.relation ? def.relation.toType : "item"} entries, e.g. [5].`
+        ? def.relation
+          ? tr("IDs of linked {type} entries, e.g. [5].", { type: def.relation.toType })
+          : tr("IDs of linked entries, e.g. [5].")
         : def.type === "gallery"
-          ? "A list of media ids, e.g. [12, 15]."
-          : "Structured data, edited as JSON.";
+          ? tr("A list of media ids, e.g. [12, 15].")
+          : tr("Structured data, edited as JSON.");
     return field(
       title,
       tag("JSON"),
@@ -2934,10 +2971,10 @@ function fieldEditor(def: FieldDef): Widget {
         edRaw[name] = s;
         touch();
       }),
-      help.length > 0 ? help : "Structured data, edited as JSON.",
+      help.length > 0 ? help : tr("Structured data, edited as JSON."),
     );
   }
-  const placeholder = def.type === "date" ? "YYYY-MM-DD" : def.type === "datetime" ? "YYYY-MM-DD HH:MM" : def.type === "url" ? "https://" : def.type === "email" ? "name@example.com" : "";
+  const placeholder = def.type === "date" ? tr("YYYY-MM-DD") : def.type === "datetime" ? tr("YYYY-MM-DD HH:MM") : def.type === "url" ? "https://" : def.type === "email" ? tr("name@example.com") : "";
   const icon = def.type === "url" ? "link" : def.type === "email" ? "envelope" : def.type === "date" || def.type === "datetime" ? "calendar" : "";
   return field(
     title,
@@ -2973,7 +3010,7 @@ function collectFields(): { fields: Record<string, unknown>; error: string } {
         continue;
       }
       const n = Number(trimmed);
-      if (!(n === n) || !isFinite(n)) return { fields: out, error: `“${shown}” needs a number.` };
+      if (!(n === n) || !isFinite(n)) return { fields: out, error: tr("“{field}” needs a number.", { field: shown }) };
       out[name] = n;
     } else if (raw !== undefined && (isJsonField(def) || (typeof out[name] === "object" && out[name] !== null))) {
       const trimmed = raw.trim();
@@ -2984,7 +3021,7 @@ function collectFields(): { fields: Record<string, unknown>; error: string } {
       try {
         out[name] = JSON.parse(trimmed);
       } catch {
-        return { fields: out, error: `“${shown}” isn't valid JSON. Check brackets, quotes and commas.` };
+        return { fields: out, error: tr("“{field}” isn't valid JSON. Check brackets, quotes and commas.", { field: shown }) };
       }
     } else if (typeof out[name] === "string" && !isLongText(def) && (out[name] as string).length === 0 && !def.required) {
       out[name] = null;
@@ -2999,7 +3036,7 @@ async function doSave(thenPublish: boolean): Promise<void> {
   const title = edTitle.trim();
   const slug = edSlug.trim().toLowerCase();
   if (title.length === 0 || slug.length === 0) {
-    setNotice("Title and slug can't be empty.", 1);
+    setNotice(tr("Title and slug can't be empty."), 1);
     return;
   }
   const collected = collectFields();
@@ -3013,7 +3050,7 @@ async function doSave(thenPublish: boolean): Promise<void> {
   seo["metaDescription"] = edSeoDesc;
 
   edBusy = true;
-  setNotice(thenPublish ? "Publishing…" : "Saving…", 0);
+  setNotice(thenPublish ? tr("Publishing…") : tr("Saving…"), 0);
   let saved = false;
   try {
     let updated = it;
@@ -3027,7 +3064,7 @@ async function doSave(thenPublish: boolean): Promise<void> {
     homeLoaded = false;
     loadEditorBuffers(updated);
     redrawEditor();
-    setNotice(thenPublish ? "Published — it's live" : "Saved", 2);
+    setNotice(thenPublish ? tr("Published — it's live") : tr("Saved"), 2);
   } catch (e) {
     edBusy = false;
     if (saved) {
@@ -3035,7 +3072,7 @@ async function doSave(thenPublish: boolean): Promise<void> {
       edDirty = false;
       contentStale = true;
       if (edStateLabel) {
-        textSetString(edStateLabel, "Saved as draft");
+        textSetString(edStateLabel, tr("Saved as draft"));
         color(edStateLabel, MUTED);
       }
     }
@@ -3044,7 +3081,7 @@ async function doSave(thenPublish: boolean): Promise<void> {
       return;
     }
     haptic("error");
-    setNotice((saved ? "Saved, but not published. " : "") + errorMessage(e), 1);
+    setNotice((saved ? tr("Saved, but not published. ") : "") + errorMessage(e), 1);
   }
 }
 
@@ -3052,7 +3089,7 @@ async function doUnpublish(): Promise<void> {
   const it = edItem;
   if (!it || edBusy) return;
   edBusy = true;
-  setNotice("Unpublishing…", 0);
+  setNotice(tr("Unpublishing…"), 0);
   try {
     const updated = await api.unpublishContent(it.id);
     edBusy = false;
@@ -3068,7 +3105,7 @@ async function doUnpublish(): Promise<void> {
       }
     }
     redrawEditor();
-    setNotice("Unpublished — it's a draft again", 2);
+    setNotice(tr("Unpublished — it's a draft again"), 2);
   } catch (e) {
     edBusy = false;
     fail(e);
@@ -3079,7 +3116,7 @@ async function doDelete(hard: boolean): Promise<void> {
   const it = edItem;
   if (!it || edBusy) return;
   edBusy = true;
-  setNotice(hard ? "Deleting…" : "Archiving…", 0);
+  setNotice(hard ? tr("Deleting…") : tr("Archiving…"), 0);
   try {
     await api.deleteContent(it.id, hard);
     edBusy = false;
@@ -3088,7 +3125,7 @@ async function doDelete(hard: boolean): Promise<void> {
     contentStale = true;
     homeLoaded = false;
     leave();
-    setNotice(hard ? "Deleted" : "Archived", 2);
+    setNotice(hard ? tr("Deleted") : tr("Archived"), 2);
   } catch (e) {
     edBusy = false;
     fail(e);
@@ -3100,13 +3137,13 @@ async function doDelete(hard: boolean): Promise<void> {
 function screenMedia(seq: number, reload: boolean): void {
   const picking = pickField.length > 0 && navStack.length > 1;
   const allowUpload = can("manageMedia");
-  if (picking) setBarHeader("Choose image", allowUpload ? [headerAction("plus", "Upload", () => startUpload())] : []);
-  else setLargeHeader("", "Media", allowUpload ? [isDesktop ? chipButton("Upload", "arrow.up.circle", B_PRIMARY, () => startUpload()) : circleAction("plus", () => startUpload())] : []);
+  if (picking) setBarHeader(tr("Choose image"), allowUpload ? [headerAction("plus", tr("Upload"), () => startUpload())] : []);
+  else setLargeHeader("", tr("Media"), allowUpload ? [isWide ? chipButton(tr("Upload"), "arrow.up.circle", B_PRIMARY, () => startUpload()) : circleAction("plus", () => startUpload())] : []);
   add(
     content,
-    searchField("Search files", mediaFilter, (s: string) => {
+    searchField(tr("Search files"), mediaFilter, (s: string) => {
       mediaFilter = s;
-      mediaShown = isDesktop ? 48 : 36;
+      mediaShown = isWide ? 48 : 36;
       drawMediaGrid(picking);
     }),
   );
@@ -3114,7 +3151,7 @@ function screenMedia(seq: number, reload: boolean): void {
   mediaGridBox = box;
   add(content, box);
   if (mediaLoaded) drawMediaGrid(picking);
-  else add(box, loadingBlock("Loading your library…"));
+  else add(box, loadingBlock(tr("Loading your library…")));
   if (!mediaLoaded || reload) {
     void (async () => {
       try {
@@ -3176,15 +3213,15 @@ function drawMediaGrid(picking: boolean): void {
     list.push(m);
   }
   if (list.length === 0) {
-    if (needle.length > 0) add(box, emptyState("magnifyingglass", "No matches", `No file name or description matches “${mediaFilter.trim()}”.`, "", null));
+    if (needle.length > 0) add(box, emptyState("magnifyingglass", tr("No matches"), tr("No file name or description matches “{q}”.", { q: mediaFilter.trim() }), "", null));
     else
       add(
         box,
-        emptyState("photo.on.rectangle.angled", "Your library is empty", "Upload photos from your phone and use them on any page.", can("manageMedia") ? "Upload a photo" : "", can("manageMedia") ? () => startUpload() : null),
+        emptyState("photo.on.rectangle.angled", tr("Your library is empty"), tr("Upload photos from your phone and use them on any page."), can("manageMedia") ? tr("Upload a photo") : "", can("manageMedia") ? () => startUpload() : null),
       );
     return;
   }
-  const cols = isDesktop ? 6 : isPad ? 5 : 3;
+  const cols = isDesktop ? 6 : isPad ? 4 : 3;
   const h = isDesktop ? 150 : isPad ? 170 : 116;
   const shown = Math.min(list.length, mediaShown);
   const grid = column(6);
@@ -3206,14 +3243,14 @@ function drawMediaGrid(picking: boolean): void {
   if (shown < list.length) {
     add(
       box,
-      button(`Show more (${list.length - shown})`, "", B_TINTED, 44, () => {
-        mediaShown += isDesktop ? 48 : 36;
+      button(tr("Show more ({n})", { n: list.length - shown }), "", B_TINTED, 44, () => {
+        mediaShown += isWide ? 48 : 36;
         drawMediaGrid(picking);
       }),
     );
   }
-  const note = cMedia.length >= 200 ? "Showing the newest 200 files" : plural(list.length, "file", "files");
-  add(box, footnote(picking ? `Tap an image to use it · ${note}` : note));
+  const note = cMedia.length >= 200 ? tr("Showing the newest 200 files") : plural(list.length, "{n} file", "{n} files");
+  add(box, footnote(picking ? `${tr("Tap an image to use it")} · ${note}` : note));
 }
 
 /** Write the chosen media id into the editor field that asked for it. */
@@ -3266,7 +3303,7 @@ function screenMediaDetail(): void {
     return;
   }
   const url = api.mediaRawUrl(m.id);
-  setBarHeader("File", [headerAction("square.and.arrow.up", "Share", () => shareUrl(url, decodeName(m.filename)))]);
+  setBarHeader(tr("File"), [headerAction("square.and.arrow.up", tr("Share"), () => shareUrl(url, decodeName(m.filename)))]);
   if (isPicture(m)) {
     const img = Image(url, "");
     widgetSetHeight(img, isDesktop ? 420 : isPad ? 460 : 300);
@@ -3284,49 +3321,49 @@ function screenMediaDetail(): void {
   const head = column(2);
   setPadding(head, 2, 4, 0, 4);
   add(head, text(decodeName(m.filename), 18, 700, INK, 2));
-  add(head, caption(`Uploaded ${relTime(m.createdAt)}`));
+  add(head, caption(tr("Uploaded {when}", { when: relTimeInline(m.createdAt) })));
   add(content, head);
 
   const rows: Widget[] = [];
-  rows.push(infoItem("Type", m.mimeType));
-  rows.push(infoItem("Size", fileSize(m.sizeBytes)));
+  rows.push(infoItem(tr("Type"), m.mimeType));
+  rows.push(infoItem(tr("Size"), fileSize(m.sizeBytes)));
   const dims = plausibleDims(m);
-  if (dims.length > 0) rows.push(infoItem("Dimensions", dims));
-  rows.push(infoItem("Uploaded", fullTime(m.createdAt)));
+  if (dims.length > 0) rows.push(infoItem(tr("Dimensions"), dims));
+  rows.push(infoItem(tr("Uploaded"), fullTime(m.createdAt)));
   add(content, group(rows, 16));
 
   add(
     content,
     buttonRow([
-      button("Copy link", "link", B_TINTED, 44, () => {
+      button(tr("Copy link"), "link", B_TINTED, 44, () => {
         clipboardWrite(url);
-        setNotice("Link copied", 2);
+        setNotice(tr("Link copied"), 2);
       }),
-      button("Open", "arrow.up.right.square", B_TINTED, 44, () => openURL(url)),
+      button(tr("Open"), "arrow.up.right.square", B_TINTED, 44, () => openURL(url)),
     ]),
   );
 
   if (can("manageMedia")) {
-    add(content, groupLabel("Alt text"));
+    add(content, groupLabel(tr("Alt text")));
     const alt = card(16, 14);
     for (let i = 0; i < siteLocales.length; i++) {
       const l = siteLocales[i] ?? "";
       add(
         alt,
         field(
-          siteLocales.length > 1 ? l.toUpperCase() : "Description",
+          siteLocales.length > 1 ? l.toUpperCase() : tr("Description"),
           null,
-          input("Describe the image", altBuffers[l] ?? "", false, "", (s: string) => {
+          input(tr("Describe the image"), altBuffers[l] ?? "", false, "", (s: string) => {
             altBuffers[l] = s;
           }),
           "",
         ),
       );
     }
-    add(alt, caption("Read aloud by screen readers and used by search engines."));
+    add(alt, caption(tr("Read aloud by screen readers and used by search engines.")));
     add(
       alt,
-      button("Save alt text", "", B_SECONDARY, 44, () => {
+      button(tr("Save alt text"), "", B_SECONDARY, 44, () => {
         void doSaveAlt();
       }),
     );
@@ -3335,8 +3372,8 @@ function screenMediaDetail(): void {
       content,
       group(
         [
-          actionItem(symbol("trash", 18, DANGER), "Delete file", DANGER, () => {
-            confirm("Delete this file?", "Pages that use it will show a broken image. This can't be undone.", "Delete", () => {
+          actionItem(symbol("trash", 18, DANGER), tr("Delete file"), DANGER, () => {
+            confirm(tr("Delete this file?"), tr("Pages that use it will show a broken image. This can't be undone."), tr("Delete"), () => {
               void doDeleteMedia();
             });
           }),
@@ -3353,11 +3390,11 @@ async function doSaveAlt(): Promise<void> {
   const alt: Record<string, string> = {};
   for (const key in m.altText) alt[key] = m.altText[key] ?? "";
   for (const key in altBuffers) alt[key] = (altBuffers[key] ?? "").trim();
-  setNotice("Saving…", 0);
+  setNotice(tr("Saving…"), 0);
   try {
     await api.updateMediaAlt(m.id, alt);
     m.altText = alt;
-    setNotice("Alt text saved", 2);
+    setNotice(tr("Alt text saved"), 2);
   } catch (e) {
     fail(e);
   }
@@ -3366,7 +3403,7 @@ async function doSaveAlt(): Promise<void> {
 async function doDeleteMedia(): Promise<void> {
   const m = selMedia;
   if (!m) return;
-  setNotice("Deleting…", 0);
+  setNotice(tr("Deleting…"), 0);
   try {
     await api.deleteMedia(m.id);
     const next: MediaItem[] = [];
@@ -3377,7 +3414,7 @@ async function doDeleteMedia(): Promise<void> {
     setMedia(next);
     selMedia = null;
     leave();
-    setNotice("File deleted", 2);
+    setNotice(tr("File deleted"), 2);
   } catch (e) {
     fail(e);
   }
@@ -3401,7 +3438,7 @@ function startUpload(): void {
 }
 
 function screenUpload(): void {
-  setBarHeader("Upload", []);
+  setBarHeader(tr("Upload"), []);
   const preview = ImageFile(upPath);
   widgetSetHeight(preview, isDesktop ? 380 : isPad ? 420 : 280);
   bg(preview, SURFACE2);
@@ -3412,17 +3449,17 @@ function screenUpload(): void {
   add(
     form,
     field(
-      `Alt text${siteLocales.length > 1 ? ` (${defaultLocale.toUpperCase()})` : ""}`,
+      `${tr("Alt text")}${siteLocales.length > 1 ? ` (${defaultLocale.toUpperCase()})` : ""}`,
       null,
-      input("What does the picture show?", upAlt, false, "", (s: string) => {
+      input(tr("What does the picture show?"), upAlt, false, "", (s: string) => {
         upAlt = s;
       }),
-      "Required. One short sentence, read aloud by screen readers and used by search engines.",
+      tr("Required. One short sentence, read aloud by screen readers and used by search engines."),
     ),
   );
   add(content, form);
   setActions([
-    button(upBusy ? "Uploading…" : "Upload to library", "arrow.up.circle.fill", B_PRIMARY, AB_H, () => {
+    button(upBusy ? tr("Uploading…") : tr("Upload to library"), "arrow.up.circle.fill", B_PRIMARY, AB_H, () => {
       void doUpload();
     }),
   ]);
@@ -3432,11 +3469,11 @@ async function doUpload(): Promise<void> {
   if (upBusy) return;
   const alt = upAlt.trim();
   if (alt.length === 0) {
-    setNotice("Add a short description of the image first.", 1);
+    setNotice(tr("Add a short description of the image first."), 1);
     return;
   }
   upBusy = true;
-  setNotice("Uploading…", 0);
+  setNotice(tr("Uploading…"), 0);
   const altText: Record<string, string> = {};
   altText[defaultLocale] = alt;
   try {
@@ -3457,7 +3494,7 @@ async function doUpload(): Promise<void> {
     } else {
       leave();
     }
-    setNotice("Uploaded", 2);
+    setNotice(tr("Uploaded"), 2);
   } catch (e) {
     upBusy = false;
     fail(e);
@@ -3492,7 +3529,7 @@ function senderName(s: FormSubmission): string {
   const full = `${first} ${last}`.trim();
   if (full.length > 0) return full;
   const email = findEmail(s);
-  return email.length > 0 ? email : `Submission #${s.id}`;
+  return email.length > 0 ? email : tr("Submission #{id}", { id: s.id });
 }
 function messagePreview(s: FormSubmission): string {
   const msg = dataValue(s, MESSAGE_KEYS);
@@ -3525,7 +3562,7 @@ function inboxRow(e: InboxEntry): Widget {
   if (preview.length > 0) add(col, text(preview, 14, 400, BODY, 2));
   const meta = hrow(6);
   put(meta, tag(e.formTitle));
-  if (s.isSpam) put(meta, pill("Spam", K_DANGER));
+  if (s.isSpam) put(meta, pill(tr("Spam"), K_DANGER));
   put(meta, Spacer());
   add(col, meta);
   put(r, grow(col));
@@ -3541,12 +3578,12 @@ function stackSetAlignment_top(w: Widget): void {
 }
 
 function screenInbox(seq: number, reload: boolean): void {
-  setLargeHeader("", "Inbox", []);
-  const seg = segmented(["Messages", "Spam"], inboxSpam ? 1 : 0, (i: number) => {
+  setLargeHeader("", tr("Inbox"), []);
+  const seg = segmented([tr("Messages"), tr("Spam")], inboxSpam ? 1 : 0, (i: number) => {
     inboxSpam = i === 1;
     reloadInbox();
   });
-  if (isDesktop) {
+  if (isWide) {
     const r = hrow(0);
     widgetSetWidth(seg, 260);
     put(r, seg);
@@ -3556,7 +3593,7 @@ function screenInbox(seq: number, reload: boolean): void {
     add(content, seg);
   }
   if (cForms.length > 1) {
-    const labels: string[] = ["All forms"];
+    const labels: string[] = [tr("All forms")];
     for (let i = 0; i < cForms.length; i++) labels.push((cForms[i] ?? { title: "" }).title);
     add(
       content,
@@ -3608,7 +3645,7 @@ function drawInbox(): void {
   if (!box || currentRoute() !== R_FORMS) return;
   widgetClearChildren(box);
   if (cForms.length === 0) {
-    add(box, emptyState("tray", "No forms on this site", "Contact and enquiry forms you add in the CMS collect their messages here.", "", null));
+    add(box, emptyState("tray", tr("No forms on this site"), tr("Contact and enquiry forms you add in the CMS collect their messages here."), "", null));
     return;
   }
   const slug = inboxForm >= 0 ? (cForms[inboxForm] ?? { slug: "" }).slug : "";
@@ -3635,8 +3672,8 @@ function drawInbox(): void {
     add(
       box,
       inboxSpam
-        ? emptyState("checkmark.shield", "No spam", "Messages flagged as spam land here.", "", null)
-        : emptyState("tray", "Inbox zero", "When someone fills in a form on your website, it shows up here.", "", null),
+        ? emptyState("checkmark.shield", tr("No spam"), tr("Messages flagged as spam land here."), "", null)
+        : emptyState("tray", tr("Inbox zero"), tr("When someone fills in a form on your website, it shows up here."), "", null),
     );
   }
 }
@@ -3650,7 +3687,7 @@ function screenSubmission(): void {
   const s = e.s;
   const who = senderName(s);
   const email = findEmail(s);
-  setBarHeader("Message", []);
+  setBarHeader(tr("Message"), []);
 
   const head = card(20, 8);
   const hc = centerColumn(6);
@@ -3660,18 +3697,18 @@ function screenSubmission(): void {
   if (email.length > 0 && email !== who) put(hc, text(email, 15, 400, MUTED, 1));
   const meta = hrow(6);
   put(meta, tag(e.formTitle));
-  if (s.isSpam) put(meta, pill("Spam", K_DANGER));
+  if (s.isSpam) put(meta, pill(tr("Spam"), K_DANGER));
   put(hc, meta);
   put(hc, text(fullTime(s.createdAt), 13, 400, MUTED, 1));
   add(head, hc);
   const acts: Widget[] = [];
-  if (email.length > 0) acts.push(button("Reply", "arrowshape.turn.up.left.fill", B_PRIMARY, 44, () => openURL(`mailto:${email}`)));
+  if (email.length > 0) acts.push(button(tr("Reply"), "arrowshape.turn.up.left.fill", B_PRIMARY, 44, () => openURL(`mailto:${email}`)));
   const lines: string[] = [];
   for (const key in s.data) lines.push(`${key}: ${plain(s.data[key])}`);
   acts.push(
-    button("Copy", "doc.on.doc", B_TINTED, 44, () => {
+    button(tr("Copy"), "doc.on.doc", B_TINTED, 44, () => {
       clipboardWrite(lines.join("\n"));
-      setNotice("Copied", 2);
+      setNotice(tr("Copied"), 2);
     }),
   );
   put(head, gap(6));
@@ -3687,7 +3724,7 @@ function screenSubmission(): void {
     rows.push(c);
   }
   if (rows.length > 0) {
-    add(content, groupLabel("Details"));
+    add(content, groupLabel(tr("Details")));
     add(content, group(rows, 16));
   }
 
@@ -3695,14 +3732,14 @@ function screenSubmission(): void {
     const danger: Widget[] = [];
     if (!s.isSpam) {
       danger.push(
-        actionItem(symbol("xmark.bin", 18, WARN_FG), "Mark as spam", WARN_FG, () => {
+        actionItem(symbol("xmark.bin", 18, WARN_FG), tr("Mark as spam"), WARN_FG, () => {
           void doSubmissionAction(e, false);
         }),
       );
     }
     danger.push(
-      actionItem(symbol("trash", 18, DANGER), "Delete message", DANGER, () => {
-        confirm("Delete this message?", "This can't be undone.", "Delete", () => {
+      actionItem(symbol("trash", 18, DANGER), tr("Delete message"), DANGER, () => {
+        confirm(tr("Delete this message?"), tr("This can't be undone."), tr("Delete"), () => {
           void doSubmissionAction(e, true);
         });
       }),
@@ -3713,7 +3750,7 @@ function screenSubmission(): void {
 }
 
 async function doSubmissionAction(e: InboxEntry, remove: boolean): Promise<void> {
-  setNotice(remove ? "Deleting…" : "Marking as spam…", 0);
+  setNotice(remove ? tr("Deleting…") : tr("Marking as spam…"), 0);
   try {
     if (remove) await api.deleteSubmission(e.s.id);
     else await api.markSubmissionSpam(e.s.id);
@@ -3730,7 +3767,7 @@ async function doSubmissionAction(e: InboxEntry, remove: boolean): Promise<void>
     cInbox = next;
     selEntry = null;
     leave();
-    setNotice(remove ? "Message deleted" : "Moved to spam", 2);
+    setNotice(remove ? tr("Message deleted") : tr("Moved to spam"), 2);
   } catch (err) {
     fail(err);
   }
@@ -3739,7 +3776,7 @@ async function doSubmissionAction(e: InboxEntry, remove: boolean): Promise<void>
 // ---------- more ---------------------------------------------------------
 
 function screenMore(): void {
-  setLargeHeader("", "More", []);
+  setLargeHeader("", tr("More"), []);
   const who = me;
   if (who) {
     const c = card(16, 0);
@@ -3757,24 +3794,24 @@ function screenMore(): void {
   }
 
   const site: Widget[] = [];
-  if (can("manageMenus")) site.push(item(iconTile("list.bullet", TILE_BLUE, 30), "Menus", "", null, true, () => go(R_MENUS)));
-  if (can("manageRedirects")) site.push(item(iconTile("arrow.triangle.branch", TILE_INDIGO, 30), "Redirects", "", null, true, () => go(R_REDIRECTS)));
-  if (can("manageSettings")) site.push(item(iconTile("gearshape.fill", TILE_GRAY, 30), "Settings", "", null, true, () => go(R_SETTINGS)));
-  if (can("manageUsers")) site.push(item(iconTile("person.2.fill", TILE_GREEN, 30), "Team", "", null, true, () => go(R_USERS)));
+  if (can("manageMenus")) site.push(item(iconTile("list.bullet", TILE_BLUE, 30), tr("Menus"), "", null, true, () => go(R_MENUS)));
+  if (can("manageRedirects")) site.push(item(iconTile("arrow.triangle.branch", TILE_INDIGO, 30), tr("Redirects"), "", null, true, () => go(R_REDIRECTS)));
+  if (can("manageSettings")) site.push(item(iconTile("gearshape.fill", TILE_GRAY, 30), tr("Settings"), "", null, true, () => go(R_SETTINGS)));
+  if (can("manageUsers")) site.push(item(iconTile("person.2.fill", TILE_GREEN, 30), tr("Team"), "", null, true, () => go(R_USERS)));
   if (site.length > 0) {
-    add(content, groupLabel("Website"));
+    add(content, groupLabel(tr("Website")));
     add(content, group(site, 58));
   }
 
   const dev: Widget[] = [];
-  if (can("manageSettings")) dev.push(item(iconTile("bolt.fill", TILE_YELLOW, 30), "Webhooks", "", null, true, () => go(R_WEBHOOKS)));
-  if (can("manageJobs")) dev.push(item(iconTile("clock.arrow.circlepath", TILE_PURPLE, 30), "Background jobs", "", hJobsBad > 0 ? pill(String(hJobsBad), K_DANGER) : null, true, () => go(R_JOBS)));
+  if (can("manageSettings")) dev.push(item(iconTile("bolt.fill", TILE_YELLOW, 30), tr("Webhooks"), "", null, true, () => go(R_WEBHOOKS)));
+  if (can("manageJobs")) dev.push(item(iconTile("clock.arrow.circlepath", TILE_PURPLE, 30), tr("Background jobs"), "", hJobsBad > 0 ? pill(String(hJobsBad), K_DANGER) : null, true, () => go(R_JOBS)));
   if (dev.length > 0) {
-    add(content, groupLabel("Developer"));
+    add(content, groupLabel(tr("Developer")));
     add(content, group(dev, 58));
   }
 
-  add(content, groupLabel("Sites"));
+  add(content, groupLabel(tr("Sites")));
   const sites = store.loadSites();
   const siteRows: Widget[] = [];
   for (let i = 0; i < sites.length; i++) {
@@ -3785,8 +3822,8 @@ function screenMore(): void {
       item(avatar(siteName(s.baseUrl), s.baseUrl, 30), siteName(s.baseUrl), s.email, current ? symbol("checkmark", 16, BRAND_INK) : null, false, current ? null : () => switchSite(s)),
     );
   }
-  siteRows.push(item(iconTile("plus", TILE_ORANGE, 30), "Add a site", "", null, false, () => addAnotherSite()));
-  siteRows.push(item(iconTile("safari.fill", TILE_TEAL, 30), "Visit website", hostOf(api.getBaseUrl()), null, false, () => openURL(api.getBaseUrl())));
+  siteRows.push(item(iconTile("plus", TILE_ORANGE, 30), tr("Add a site"), "", null, false, () => addAnotherSite()));
+  siteRows.push(item(iconTile("safari.fill", TILE_TEAL, 30), tr("Visit website"), hostOf(api.getBaseUrl()), null, false, () => openURL(api.getBaseUrl())));
   add(content, group(siteRows, 58));
 
   add(content, gap(2));
@@ -3794,8 +3831,8 @@ function screenMore(): void {
     content,
     group(
       [
-        actionItem(null, "Sign out", DANGER, () => {
-          confirm("Sign out?", `You'll need your password to sign in to ${siteName(api.getBaseUrl())} again.`, "Sign out", () => {
+        actionItem(null, tr("Sign out"), DANGER, () => {
+          confirm(tr("Sign out?"), tr("You'll need your password to sign in to {site} again.", { site: siteName(api.getBaseUrl()) }), tr("Sign out"), () => {
             void doSignOut();
           });
         }),
@@ -3820,7 +3857,7 @@ function switchSite(site: store.SavedSite): void {
 // ---------- menus --------------------------------------------------------
 
 function screenMenus(seq: number, reload: boolean): void {
-  setBarHeader("Menus", []);
+  setBarHeader(tr("Menus"), []);
   if (menusLoaded && !reload) {
     drawMenus();
     return;
@@ -3842,7 +3879,7 @@ function screenMenus(seq: number, reload: boolean): void {
 
 function drawMenus(): void {
   if (cMenus.length === 0) {
-    add(content, emptyState("list.bullet", "No menus", "Navigation menus are set up by a developer in the CMS.", "", null));
+    add(content, emptyState("list.bullet", tr("No menus"), tr("Navigation menus are set up by a developer in the CMS."), "", null));
     return;
   }
   const rows: Widget[] = [];
@@ -3880,7 +3917,7 @@ function screenMenu(seq: number, reload: boolean): void {
     return;
   }
   setBarHeader(m.label, [
-    headerAction("plus", "Add link", () => {
+    headerAction("plus", tr("Add link"), () => {
       newLinkLabel = "";
       newLinkUrl = "";
       go(R_MENU_ADD);
@@ -3921,7 +3958,7 @@ function drawMenu(m: MenuSummary): void {
   if (cMenuItems.length === 0) {
     add(
       content,
-      emptyState("link", "No links yet", "Add the pages people should find in this menu.", "Add a link", () => {
+      emptyState("link", tr("No links yet"), tr("Add the pages people should find in this menu."), tr("Add a link"), () => {
         newLinkLabel = "";
         newLinkUrl = "";
         go(R_MENU_ADD);
@@ -3934,15 +3971,15 @@ function drawMenu(m: MenuSummary): void {
     const entry = cMenuItems[i];
     if (!entry) continue;
     const it = entry.item;
-    const target = it.url ? it.url : it.contentId ? `Linked page #${it.contentId}` : "";
+    const target = it.url ? it.url : it.contentId ? tr("Linked page #{id}", { id: it.contentId }) : "";
     const r = item(symbol(entry.depth > 0 ? "arrow.turn.down.right" : it.contentId ? "doc.text" : "link", 16, entry.depth > 0 ? FAINT : BRAND_INK), it.label, target, null, false, () => {
-      confirm("Remove this link?", `“${it.label}” is taken out of the menu.`, "Remove", () => {
+      confirm(tr("Remove this link?"), tr("“{label}” is taken out of the menu.", { label: it.label }), tr("Remove"), () => {
         void (async () => {
-          setNotice("Removing…", 0);
+          setNotice(tr("Removing…"), 0);
           try {
             await api.deleteMenuItem(m.slug, it.id);
             render(true);
-            setNotice("Link removed", 2);
+            setNotice(tr("Link removed"), 2);
           } catch (e) {
             fail(e);
           }
@@ -3953,7 +3990,7 @@ function drawMenu(m: MenuSummary): void {
     rows.push(r);
   }
   add(content, group(rows, 46));
-  add(content, footnote("Tap a link to remove it. Reordering and nesting are done in the CMS."));
+  add(content, footnote(tr("Tap a link to remove it. Reordering and nesting are done in the CMS.")));
 }
 
 function screenMenuAdd(): void {
@@ -3962,14 +3999,14 @@ function screenMenuAdd(): void {
     leave();
     return;
   }
-  setBarHeader("Add link", []);
+  setBarHeader(tr("Add link"), []);
   const form = card(16, 16);
   add(
     form,
     field(
-      `Label${siteLocales.length > 1 ? ` (${menuLocale.toUpperCase()})` : ""}`,
+      `${tr("Label")}${siteLocales.length > 1 ? ` (${menuLocale.toUpperCase()})` : ""}`,
       null,
-      input("About us", newLinkLabel, false, "textformat", (s: string) => {
+      input(tr("About us"), newLinkLabel, false, "textformat", (s: string) => {
         newLinkLabel = s;
       }),
       "",
@@ -3978,34 +4015,34 @@ function screenMenuAdd(): void {
   add(
     form,
     field(
-      "Address",
+      tr("Address"),
       null,
-      input("/about or https://…", newLinkUrl, false, "link", (s: string) => {
+      input(tr("/about or https://…"), newLinkUrl, false, "link", (s: string) => {
         newLinkUrl = s;
       }),
-      "A path on your site, or a full web address.",
+      tr("A path on your site, or a full web address."),
     ),
   );
   add(content, form);
   setActions([
-    button("Add to menu", "plus", B_PRIMARY, AB_H, () => {
+    button(tr("Add to menu"), "plus", B_PRIMARY, AB_H, () => {
       void (async () => {
         const label = newLinkLabel.trim();
         const url = newLinkUrl.trim();
         if (label.length === 0 || url.length === 0) {
-          setNotice("Enter a label and an address.", 1);
+          setNotice(tr("Enter a label and an address."), 1);
           return;
         }
         const labelMap: Record<string, string> = {};
         labelMap[menuLocale] = label;
-        setNotice("Adding…", 0);
+        setNotice(tr("Adding…"), 0);
         try {
           await api.createMenuItem(m.slug, { label: labelMap, url, sortOrder: cMenuItems.length + 1 });
           newLinkLabel = "";
           newLinkUrl = "";
           menuItemsFor = "";
           leave();
-          setNotice("Link added", 2);
+          setNotice(tr("Link added"), 2);
         } catch (e) {
           fail(e);
         }
@@ -4022,8 +4059,8 @@ const REDIRECT_CODES = [301, 302, 307, 308];
 let newRedirectCode = 0;
 
 function screenRedirects(seq: number, reload: boolean): void {
-  setBarHeader("Redirects", [
-    headerAction("plus", "New redirect", () => {
+  setBarHeader(tr("Redirects"), [
+    headerAction("plus", tr("New redirect"), () => {
       newRedirectSource = "";
       newRedirectDest = "";
       newRedirectCode = 0;
@@ -4053,7 +4090,7 @@ function drawRedirects(): void {
   if (cRedirects.length === 0) {
     add(
       content,
-      emptyState("arrow.triangle.branch", "No redirects", "Forward old or short addresses to the right page, so links keep working.", "Add a redirect", () => go(R_REDIRECT_ADD)),
+      emptyState("arrow.triangle.branch", tr("No redirects"), tr("Forward old or short addresses to the right page, so links keep working."), tr("Add a redirect"), () => go(R_REDIRECT_ADD)),
     );
     return;
   }
@@ -4063,13 +4100,13 @@ function drawRedirects(): void {
     if (!r) continue;
     rows.push(
       item(null, r.source, `→ ${r.destination}`, pill(String(r.statusCode), r.statusCode === 301 || r.statusCode === 308 ? K_INFO : K_NEUTRAL), false, () => {
-        confirm("Remove this redirect?", `${r.source} will stop forwarding to ${r.destination}.`, "Remove", () => {
+        confirm(tr("Remove this redirect?"), tr("{from} will stop forwarding to {to}.", { from: r.source, to: r.destination }), tr("Remove"), () => {
           void (async () => {
-            setNotice("Removing…", 0);
+            setNotice(tr("Removing…"), 0);
             try {
               await api.deleteRedirect(r.id);
               render(true);
-              setNotice("Redirect removed", 2);
+              setNotice(tr("Redirect removed"), 2);
             } catch (e) {
               fail(e);
             }
@@ -4079,18 +4116,18 @@ function drawRedirects(): void {
     );
   }
   add(content, group(rows, 16));
-  add(content, footnote(`${plural(cRedirects.length, "redirect", "redirects")} · tap one to remove it`));
+  add(content, footnote(plural(cRedirects.length, "{n} redirect · tap it to remove it", "{n} redirects · tap one to remove it")));
 }
 
 function screenRedirectAdd(): void {
-  setBarHeader("New redirect", []);
+  setBarHeader(tr("New redirect"), []);
   const form = card(16, 16);
   add(
     form,
     field(
-      "From",
+      tr("From"),
       null,
-      input("/old-page", newRedirectSource, false, "arrow.uturn.right", (s: string) => {
+      input(tr("/old-page"), newRedirectSource, false, "arrow.uturn.right", (s: string) => {
         newRedirectSource = s;
       }),
       "",
@@ -4099,9 +4136,9 @@ function screenRedirectAdd(): void {
   add(
     form,
     field(
-      "To",
+      tr("To"),
       null,
-      input("/new-page or https://…", newRedirectDest, false, "arrow.right", (s: string) => {
+      input(tr("/new-page or https://…"), newRedirectDest, false, "arrow.right", (s: string) => {
         newRedirectDest = s;
       }),
       "",
@@ -4110,30 +4147,30 @@ function screenRedirectAdd(): void {
   add(
     form,
     field(
-      "Type",
+      tr("Type"),
       null,
       segmented(["301", "302", "307", "308"], newRedirectCode, (i: number) => {
         newRedirectCode = i;
       }),
-      "301 for a permanent move (best for search engines), 302 for a temporary one.",
+      tr("301 for a permanent move (best for search engines), 302 for a temporary one."),
     ),
   );
   add(content, form);
   setActions([
-    button("Add redirect", "plus", B_PRIMARY, AB_H, () => {
+    button(tr("Add redirect"), "plus", B_PRIMARY, AB_H, () => {
       void (async () => {
         const source = newRedirectSource.trim();
         const dest = newRedirectDest.trim();
         if (source.length === 0 || dest.length === 0) {
-          setNotice("Enter both addresses.", 1);
+          setNotice(tr("Enter both addresses."), 1);
           return;
         }
-        setNotice("Adding…", 0);
+        setNotice(tr("Adding…"), 0);
         try {
           await api.createRedirect(source, dest, REDIRECT_CODES[newRedirectCode] ?? 301);
           redirectsLoaded = false;
           leave();
-          setNotice("Redirect added", 2);
+          setNotice(tr("Redirect added"), 2);
         } catch (e) {
           fail(e);
         }
@@ -4145,10 +4182,10 @@ function screenRedirectAdd(): void {
 // ---------- settings -----------------------------------------------------
 
 function screenSettings(seq: number, reload: boolean): void {
-  setBarHeader("Settings", []);
+  setBarHeader(tr("Settings"), []);
   add(
     content,
-    searchField("Search settings", settingsFilter, (s: string) => {
+    searchField(tr("Search settings"), settingsFilter, (s: string) => {
       settingsFilter = s;
       drawSettings();
     }),
@@ -4186,7 +4223,7 @@ function drawSettings(): void {
   if (!box || currentRoute() !== R_SETTINGS) return;
   widgetClearChildren(box);
   if (cSettings.length === 0) {
-    add(box, emptyState("gearshape", "No settings", "No settings are stored for this site.", "", null));
+    add(box, emptyState("gearshape", tr("No settings"), tr("No settings are stored for this site."), "", null));
     return;
   }
   const needle = settingsFilter.trim().toLowerCase();
@@ -4199,7 +4236,7 @@ function drawSettings(): void {
     const preview = plain(s.value);
     if (needle.length > 0 && s.key.toLowerCase().indexOf(needle) < 0 && preview.toLowerCase().indexOf(needle) < 0) continue;
     const dot = s.key.indexOf(".");
-    const p = dot > 0 ? s.key.slice(0, dot) : "general";
+    const p = dot > 0 ? s.key.slice(0, dot) : tr("general");
     if (p !== prefix) {
       if (rows.length > 0) add(box, group(rows, 16));
       rows = [];
@@ -4217,15 +4254,15 @@ function drawSettings(): void {
     );
   }
   if (rows.length > 0) add(box, group(rows, 16));
-  else add(box, emptyState("magnifyingglass", "No matches", `No setting matches “${settingsFilter.trim()}”.`, "", null));
+  else add(box, emptyState("magnifyingglass", tr("No matches"), `No setting matches “${settingsFilter.trim()}”.`, "", null));
 }
 
 function screenSetting(): void {
-  setBarHeader("Setting", []);
+  setBarHeader(tr("Setting"), []);
   const head = column(2);
   setPadding(head, 2, 4, 0, 4);
   add(head, text(selSettingKey, 18, 700, INK, 0));
-  add(head, caption(selSettingIsString ? "Text value" : "Structured value (JSON)"));
+  add(head, caption(selSettingIsString ? tr("Text value") : tr("Structured value (JSON)")));
   add(content, head);
   const form = card(16, 12);
   add(
@@ -4234,28 +4271,28 @@ function screenSetting(): void {
       selSettingText = s;
     }),
   );
-  if (!selSettingIsString) add(form, caption("Keep the brackets, quotes and commas intact."));
+  if (!selSettingIsString) add(form, caption(tr("Keep the brackets, quotes and commas intact.")));
   add(content, form);
   setActions([
-    button("Save setting", "", B_PRIMARY, AB_H, () => {
+    button(tr("Save setting"), "", B_PRIMARY, AB_H, () => {
       void (async () => {
         let value: unknown = selSettingText;
         if (!selSettingIsString) {
           try {
             value = JSON.parse(selSettingText);
           } catch {
-            setNotice("That isn't valid JSON. Check brackets, quotes and commas.", 1);
+            setNotice(tr("That isn't valid JSON. Check brackets, quotes and commas."), 1);
             return;
           }
         }
-        setNotice("Saving…", 0);
+        setNotice(tr("Saving…"), 0);
         try {
           await api.putSetting(selSettingKey, value);
           for (let i = 0; i < cSettings.length; i++) {
             const row = cSettings[i];
             if (row && row.key === selSettingKey) row.value = value;
           }
-          setNotice("Saved", 2);
+          setNotice(tr("Saved"), 2);
         } catch (e) {
           fail(e);
         }
@@ -4267,7 +4304,7 @@ function screenSetting(): void {
 // ---------- webhooks -----------------------------------------------------
 
 function screenWebhooks(seq: number, reload: boolean): void {
-  setBarHeader("Webhooks", []);
+  setBarHeader(tr("Webhooks"), []);
   if (webhooksLoaded && !reload) {
     drawWebhooks();
     return;
@@ -4289,16 +4326,16 @@ function screenWebhooks(seq: number, reload: boolean): void {
 
 function drawWebhooks(): void {
   if (cWebhooks.length === 0) {
-    add(content, emptyState("bolt", "No webhooks", "Webhooks notify other systems when content changes. A developer sets them up in the CMS.", "", null));
+    add(content, emptyState("bolt", tr("No webhooks"), tr("Webhooks notify other systems when content changes. A developer sets them up in the CMS."), "", null));
     return;
   }
   const rows: Widget[] = [];
   for (let i = 0; i < cWebhooks.length; i++) {
     const w = cWebhooks[i];
     if (!w) continue;
-    const sub = w.description && w.description.length > 0 ? w.description : plural(w.events.length, "event", "events");
+    const sub = w.description && w.description.length > 0 ? w.description : plural(w.events.length, "{n} event", "{n} events");
     rows.push(
-      item(iconTile("bolt.fill", w.active ? TILE_YELLOW : TILE_GRAY, 30), hostOf(w.url), sub, pill(w.active ? "Active" : "Paused", w.active ? K_OK : K_NEUTRAL), true, () => {
+      item(iconTile("bolt.fill", w.active ? TILE_YELLOW : TILE_GRAY, 30), hostOf(w.url), sub, pill(w.active ? tr("Active") : tr("Paused"), w.active ? K_OK : K_NEUTRAL), true, () => {
         selWebhook = w;
         go(R_WEBHOOK);
       }),
@@ -4313,30 +4350,30 @@ function screenWebhook(seq: number, reload: boolean): void {
     leave();
     return;
   }
-  setBarHeader("Webhook", []);
+  setBarHeader(tr("Webhook"), []);
   const rows: Widget[] = [];
-  rows.push(infoItem("Sends to", w.url));
-  if (w.description) rows.push(infoItem("Note", w.description));
-  rows.push(infoItem("Events", w.events.join(", ")));
-  rows.push(infoItem("Status", w.active ? "Active" : "Paused"));
+  rows.push(infoItem(tr("Sends to"), w.url));
+  if (w.description) rows.push(infoItem(tr("Note"), w.description));
+  rows.push(infoItem(tr("Events"), w.events.join(", ")));
+  rows.push(infoItem(tr("Status"), w.active ? tr("Active") : tr("Paused")));
   add(content, group(rows, 16));
   add(
     content,
-    button(w.active ? "Pause deliveries" : "Resume deliveries", w.active ? "pause.fill" : "play.fill", B_SECONDARY, 46, () => {
+    button(w.active ? tr("Pause deliveries") : tr("Resume deliveries"), w.active ? "pause.fill" : "play.fill", B_SECONDARY, 46, () => {
       void (async () => {
-        setNotice("Updating…", 0);
+        setNotice(tr("Updating…"), 0);
         try {
           await api.setWebhookActive(w.id, !w.active);
           w.active = w.active ? 0 : 1;
           render(false);
-          setNotice(w.active ? "Resumed" : "Paused", 2);
+          setNotice(w.active ? tr("Resumed") : tr("Paused"), 2);
         } catch (e) {
           fail(e);
         }
       })();
     }),
   );
-  add(content, groupLabel("Recent deliveries"));
+  add(content, groupLabel(tr("Recent deliveries")));
   if (deliveriesFor === w.id && !reload) {
     drawDeliveries();
     return;
@@ -4369,7 +4406,7 @@ function deliveryTime(d: WebhookDelivery): string {
 function drawDeliveries(): void {
   if (cDeliveries.length === 0) {
     const c = card(16, 0);
-    add(c, caption("Nothing has been sent yet."));
+    add(c, caption(tr("Nothing has been sent yet.")));
     add(content, c);
     return;
   }
@@ -4382,7 +4419,7 @@ function drawDeliveries(): void {
     if (when.length > 0) parts.push(when);
     if (d.latencyMs !== null && d.latencyMs !== undefined) parts.push(`${d.latencyMs} ms`);
     if (d.error) parts.push(d.error);
-    const status = d.responseStatus !== null && d.responseStatus !== undefined ? String(d.responseStatus) : d.succeeded ? "OK" : "Failed";
+    const status = d.responseStatus !== null && d.responseStatus !== undefined ? String(d.responseStatus) : d.succeeded ? "OK" : tr("Failed");
     rows.push(item(null, d.event, parts.join(" · "), pill(status, d.succeeded ? K_OK : K_DANGER), false, null));
   }
   add(content, group(rows, 16));
@@ -4391,7 +4428,7 @@ function drawDeliveries(): void {
 // ---------- jobs ---------------------------------------------------------
 
 function screenJobs(seq: number, reload: boolean): void {
-  setBarHeader("Background jobs", []);
+  setBarHeader(tr("Background jobs"), []);
   if (jobsLoaded && !reload) {
     drawJobs();
     return;
@@ -4432,7 +4469,7 @@ function jobTile(label: string, n: number, c: Rgba): Widget {
 
 function drawJobs(): void {
   const keys = ["pending", "running", "done", "failed", "dead"];
-  const names = ["Waiting", "Running", "Finished", "Failed", "Gave up"];
+  const names = [tr("Waiting"), tr("Running"), tr("Finished"), tr("Failed"), tr("Gave up")];
   const colors: Rgba[] = [INK, TILE_BLUE, OK_FG, WARN_FG, DANGER];
   const r1 = HStack(10, []);
   stackSetDistribution(r1, 1);
@@ -4446,16 +4483,16 @@ function drawJobs(): void {
   put(r2, VStack(0, []));
   add(content, r1);
   add(content, r2);
-  add(content, groupLabel("Needs attention"));
+  add(content, groupLabel(tr("Needs attention")));
   if (jobsListError.length > 0) {
-    add(content, banner(K_WARN, "exclamationmark.triangle.fill", `The job list couldn't be loaded: ${jobsListError}`));
+    add(content, banner(K_WARN, "exclamationmark.triangle.fill", tr("The job list couldn't be loaded: {error}", { error: jobsListError })));
     return;
   }
   if (cJobs.length === 0) {
     const c = card(16, 0);
     const r = hrow(12);
     put(r, softTile("checkmark", OK_FG, tintFill(TILE_GREEN), 36, true));
-    put(r, grow(text("No failed jobs. Everything ran fine.", 15, 500, INK, 0)));
+    put(r, grow(text(tr("No failed jobs. Everything ran fine."), 15, 500, INK, 0)));
     add(c, r);
     add(content, c);
     return;
@@ -4464,20 +4501,20 @@ function drawJobs(): void {
   for (let i = 0; i < cJobs.length; i++) {
     const j = cJobs[i];
     if (!j) continue;
-    const kind = j.kind ?? j.queue ?? `Job #${j.id}`;
-    const sub = `${j.status === "dead" ? "Gave up" : "Failed"} · ${plural(j.attempts, "try", "tries")}${j.lastError ? ` · ${j.lastError}` : ""}`;
+    const kind = j.kind ?? j.queue ?? tr("Job #{id}", { id: j.id });
+    const sub = `${j.status === "dead" ? tr("Gave up") : tr("Failed")} · ${plural(j.attempts, "{n} attempt", "{n} attempts")}${j.lastError ? ` · ${j.lastError}` : ""}`;
     rows.push(
       item(
         iconTile("exclamationmark.triangle.fill", j.status === "dead" ? TILE_RED : TILE_ORANGE, 30),
         kind,
         sub,
-        chipButton("Retry", "arrow.clockwise", B_TINTED, () => {
+        chipButton(tr("Retry"), "arrow.clockwise", B_TINTED, () => {
           void (async () => {
-            setNotice("Retrying…", 0);
+            setNotice(tr("Retrying…"), 0);
             try {
               await api.retryJob(j.id);
               render(true);
-              setNotice("Queued again", 2);
+              setNotice(tr("Queued again"), 2);
             } catch (e) {
               fail(e);
             }
@@ -4498,7 +4535,7 @@ let inviteName = "";
 let inviteRole = -1;
 
 function screenUsers(seq: number, reload: boolean): void {
-  setBarHeader("Team", can("manageUsers") ? [headerAction("person.badge.plus", "Invite", () => go(R_INVITE))] : []);
+  setBarHeader(tr("Team"), can("manageUsers") ? [headerAction("person.badge.plus", tr("Invite"), () => go(R_INVITE))] : []);
   if (usersLoaded && !reload) {
     drawUsers();
     return;
@@ -4527,12 +4564,12 @@ function userMenu(u: UserListItem): void {
   const suspended = u.status === "suspended";
   const run = (): void => {
     void (async () => {
-      setNotice("Updating…", 0);
+      setNotice(tr("Updating…"), 0);
       try {
         if (suspended) await api.unsuspendUser(u.id);
         else await api.suspendUser(u.id);
         render(true);
-        setNotice(suspended ? "Access restored" : "Suspended", 2);
+        setNotice(suspended ? tr("Access restored") : tr("Suspended"), 2);
       } catch (e) {
         fail(e);
       }
@@ -4540,14 +4577,14 @@ function userMenu(u: UserListItem): void {
   };
   const labels: string[] = [];
   const handlers: (() => void)[] = [];
-  labels.push(`Email ${firstName(u.displayName)}`);
+  labels.push(tr("Email {name}", { name: firstName(u.displayName) }));
   handlers.push(() => openURL(`mailto:${u.email}`));
   if (suspended) {
-    labels.push("Restore access");
+    labels.push(tr("Restore access"));
     handlers.push(run);
   } else {
-    labels.push("Suspend access");
-    handlers.push(() => confirm("Suspend this person?", `${u.displayName} is signed out everywhere and can't sign in until restored.`, "Suspend", run));
+    labels.push(tr("Suspend access"));
+    handlers.push(() => confirm(tr("Suspend this person?"), tr("{name} is signed out everywhere and can't sign in until restored.", { name: u.displayName }), tr("Suspend"), run));
   }
   actionMenu(u.displayName, labels, handlers);
 }
@@ -4561,26 +4598,26 @@ function drawUsers(): void {
     const role = u.roleLabel ?? u.roleSlug ?? "";
     const trailing = column(4);
     if (role.length > 0) put(trailing, tag(role));
-    if (u.status !== "active") put(trailing, pill(u.status === "invited" ? "Invited" : u.status === "suspended" ? "Suspended" : u.status, u.status === "suspended" ? K_DANGER : K_WARN));
+    if (u.status !== "active") put(trailing, pill(u.status === "invited" ? tr("Invited") : u.status === "suspended" ? tr("Suspended") : u.status, u.status === "suspended" ? K_DANGER : K_WARN));
     widgetSetHugging(trailing, 750);
     const isMe = u.id === myId;
-    rows.push(item(avatar(u.displayName, u.email, 40), isMe ? `${u.displayName} (you)` : u.displayName, u.email, trailing, false, isMe ? null : () => userMenu(u)));
+    rows.push(item(avatar(u.displayName, u.email, 40), isMe ? tr("{name} (you)", { name: u.displayName }) : u.displayName, u.email, trailing, false, isMe ? null : () => userMenu(u)));
   }
   add(content, group(rows, 68));
   if (cRoles.length > 0) {
-    add(content, button("Invite someone", "person.badge.plus", B_SECONDARY, 46, () => go(R_INVITE)));
+    add(content, button(tr("Invite someone"), "person.badge.plus", B_SECONDARY, 46, () => go(R_INVITE)));
   }
 }
 
 function screenInvite(): void {
-  setBarHeader("Invite", []);
+  setBarHeader(tr("Invite"), []);
   const form = card(16, 16);
   add(
     form,
     field(
-      "Name",
+      tr("Name"),
       null,
-      input("Full name", inviteName, false, "person", (s: string) => {
+      input(tr("Full name"), inviteName, false, "person", (s: string) => {
         inviteName = s;
       }),
       "",
@@ -4589,9 +4626,9 @@ function screenInvite(): void {
   add(
     form,
     field(
-      "Email",
+      tr("Email"),
       null,
-      input("name@example.com", inviteEmail, false, "envelope", (s: string) => {
+      input(tr("name@example.com"), inviteEmail, false, "envelope", (s: string) => {
         inviteEmail = s;
       }),
       "",
@@ -4603,7 +4640,7 @@ function screenInvite(): void {
     add(
       form,
       field(
-        "Role",
+        tr("Role"),
         null,
         chips(labels, inviteRole >= 0 ? [inviteRole] : [], false, (sel: number[]) => {
           inviteRole = sel[0] ?? -1;
@@ -4613,18 +4650,18 @@ function screenInvite(): void {
     );
   }
   add(content, form);
-  add(content, footnote("They get an email with a link to set their password."));
+  add(content, footnote(tr("They get an email with a link to set their password.")));
   setActions([
-    button("Send invitation", "paperplane.fill", B_PRIMARY, AB_H, () => {
+    button(tr("Send invitation"), "paperplane.fill", B_PRIMARY, AB_H, () => {
       void (async () => {
         const email = inviteEmail.trim().toLowerCase();
         const name = inviteName.trim();
         const role = cRoles[inviteRole];
         if (email.length === 0 || name.length === 0 || !role) {
-          setNotice("Enter a name and an email, and pick a role.", 1);
+          setNotice(tr("Enter a name and an email, and pick a role."), 1);
           return;
         }
-        setNotice("Sending…", 0);
+        setNotice(tr("Sending…"), 0);
         try {
           await api.inviteUser(email, name, role.id);
           inviteEmail = "";
@@ -4632,7 +4669,7 @@ function screenInvite(): void {
           inviteRole = -1;
           usersLoaded = false;
           leave();
-          setNotice("Invitation sent", 2);
+          setNotice(tr("Invitation sent"), 2);
         } catch (e) {
           fail(e);
         }
@@ -4647,7 +4684,7 @@ let newPassword = "";
 let newPassword2 = "";
 
 function screenAccount(): void {
-  setBarHeader("Account", []);
+  setBarHeader(tr("Account"), []);
   const who = me;
   if (!who) return;
   const head = centerColumn(6);
@@ -4660,17 +4697,17 @@ function screenAccount(): void {
 
   add(
     content,
-    group([infoItem("Role", who.user.role.label), infoItem("Site", hostOf(api.getBaseUrl())), infoItem("Language", who.user.locale.toUpperCase())], 16),
+    group([infoItem(tr("Role"), who.user.role.label), infoItem(tr("Site"), hostOf(api.getBaseUrl())), infoItem(tr("Language"), who.user.locale.toUpperCase())], 16),
   );
 
-  add(content, groupLabel("Change password"));
+  add(content, groupLabel(tr("Change password")));
   const pw = card(16, 14);
   add(
     pw,
     field(
-      "New password",
+      tr("New password"),
       null,
-      input("At least 12 characters", "", true, "lock", (s: string) => {
+      input(tr("At least 12 characters"), "", true, "lock", (s: string) => {
         newPassword = s;
       }),
       "",
@@ -4679,33 +4716,33 @@ function screenAccount(): void {
   add(
     pw,
     field(
-      "Repeat new password",
+      tr("Repeat new password"),
       null,
-      input("Repeat it", "", true, "lock", (s: string) => {
+      input(tr("Repeat it"), "", true, "lock", (s: string) => {
         newPassword2 = s;
       }),
-      "Changing it signs you out on every device.",
+      tr("Changing it signs you out on every device."),
     ),
   );
   add(
     pw,
-    button("Change password", "", B_SECONDARY, 46, () => {
+    button(tr("Change password"), "", B_SECONDARY, 46, () => {
       void (async () => {
         if (newPassword.length < 12) {
-          setNotice("Use at least 12 characters.", 1);
+          setNotice(tr("Use at least 12 characters."), 1);
           return;
         }
         if (newPassword !== newPassword2) {
-          setNotice("The two passwords don't match.", 1);
+          setNotice(tr("The two passwords don't match."), 1);
           return;
         }
-        setNotice("Changing…", 0);
+        setNotice(tr("Changing…"), 0);
         try {
           await api.changeOwnProfile(who.user.id, { password: newPassword });
           newPassword = "";
           newPassword2 = "";
           // The CMS signs every device out when the password changes.
-          endSession("Password changed. Sign in with the new one.");
+          endSession(tr("Password changed. Sign in with the new one."));
         } catch (e) {
           fail(e);
         }
@@ -4717,8 +4754,8 @@ function screenAccount(): void {
     content,
     group(
       [
-        actionItem(null, "Sign out", DANGER, () => {
-          confirm("Sign out?", `You'll need your password to sign in to ${siteName(api.getBaseUrl())} again.`, "Sign out", () => {
+        actionItem(null, tr("Sign out"), DANGER, () => {
+          confirm(tr("Sign out?"), tr("You'll need your password to sign in to {site} again.", { site: siteName(api.getBaseUrl()) }), tr("Sign out"), () => {
             void doSignOut();
           });
         }),

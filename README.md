@@ -1,7 +1,7 @@
 # Skelpo CMS Admin
 
-A native app for editing and publishing a [Skelpo CMS](../skelpo-cms) website
-from a phone. One [Perry](../PERRY-GUIDE.md) `perry/ui` source tree builds for
+A native app for editing and publishing a [Skelpo CMS](https://www.skelpo.com) website
+from a phone. One [Perry](https://github.com/PerryTS/perry) `perry/ui` source tree builds for
 iOS, Android, macOS, Linux and Windows. It is a pure client: it signs in to the
 CMS that runs behind a website (`https://<site>/api/v1`).
 
@@ -38,25 +38,19 @@ be signed in at once. Sessions last 30 days and are rotated near expiry.
 ## Server requirements
 
 The site's web server must forward `/api/v1/` to the CMS **without caching
-authenticated responses**:
+authenticated responses** (important behind a CDN). With nginx, for a CMS
+on port 3142:
 
-- **verrano.de** — already works: nginx proxies `/api/` to the CMS.
-- **skelpo.com** — not yet: only `/admin` and `/api/v1/media/<id>/raw` are
-  forwarded. Add to the `www.skelpo.com` server block (next to the existing
-  admin snippet; plain prefix so the media `raw` regex location still wins):
-
-  ```nginx
-  location /api/v1/ {
-      proxy_pass http://127.0.0.1:3142;
-      include /etc/nginx/proxy_params;
-      client_max_body_size 32m;
-      proxy_hide_header Cache-Control;
-      add_header Cache-Control "private, no-store" always;
-      add_header X-Robots-Tag "noindex, nofollow" always;
-  }
-  ```
-
-  `no-store` matters because www is behind Bunny CDN.
+```nginx
+location /api/v1/ {
+    proxy_pass http://127.0.0.1:3142;
+    include /etc/nginx/proxy_params;
+    client_max_body_size 32m;
+    proxy_hide_header Cache-Control;
+    add_header Cache-Control "private, no-store" always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+}
+```
 
 ## Build and run
 
@@ -67,10 +61,28 @@ make sim-install   # iOS simulator
 make device        # connected iPhone; first run: perry setup ios --development
 ```
 
-Builds must use the local Perry worktree, which carries a fix for network
-requests hanging in UI apps (see CLAUDE.md, "Known Perry gaps"). For the same
-reason `perry publish` (which builds on Perry Hub) has to wait until that fix
-is upstream.
+The app needs a Perry build with UI fixes that are not in a Perry release
+yet (network requests in UI apps, iOS photo picker and share sheet, Android
+backend; see CLAUDE.md, "Known Perry gaps"). Build Perry from that branch
+and point the Makefile at it:
+
+```bash
+make PERRY_WT=/path/to/perry/target/release run
+```
+
+By default the Makefile and scripts expect the Perry checkout at
+`../perry/worktrees/ui-ios-fixes`. `.cargo/config.toml` points the
+markdown editor's native crate at the same checkout. Until the fixes ship,
+`perry publish` (which builds on Perry Hub) produces an app whose requests
+hang.
+
+App Store builds: `make testflight` (needs your own App Store Connect API
+key, distribution certificate and profile in `~/.perry`; see
+`scripts/testflight.sh`).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
 
 ## Layout
 
