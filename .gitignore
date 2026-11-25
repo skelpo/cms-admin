@@ -8,3 +8,4 @@ node_modules/
 __pycache__/
 appstore/demo/uploads-*/
 appstore/demo/photos/
+*.local.md

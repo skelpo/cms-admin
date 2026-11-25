@@ -250,11 +250,11 @@ Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
 - Listing text, categories, age rating, copyright and review notes:
   `appstore/metadata.json` → `python3 scripts/asc.py metadata`. Not settable by
   API (do it in the web UI): App Privacy ("Data Not Collected"), price and
-  availability, review contact and the demo account. The review-notes PATCH
-  fails (409) until the review contact is filled in.
+  availability. Every `appStoreReviewDetails` PATCH (notes, demo account)
+  fails with 409 until the review contact, with a `+<country>` phone, is set.
 - Demo account for App Review: https://demo.skelpo.com, its own Skelpo CMS
-  instance on webserver.skelpo.net (see appstore/demo/README.md for the
-  setup and how to reset its content).
+  instance (appstore/demo/README.md; server notes in the gitignored
+  appstore/demo/server.local.md).
 - The Perry compiler must link LLVM 22 (`LLVM_SYS_221_PREFIX=/opt/homebrew/opt/llvm@22`);
   Homebrew's `llvm` is 23, which rejects Perry's iOS `Os` level.
 - The Makefile now points at the `ui-ios-fixes` worktree (the #14799 branch);

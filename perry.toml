@@ -27,7 +27,6 @@ orientations = ["portrait", "landscape-left", "landscape-right"]
 distribute = "testflight"
 encryption_exempt = true
 signing_identity = "Apple Distribution: Skelpo GmbH (K6UW5YV9F7)"
-certificate = "/Users/amlug/.perry/distribution.p12"
 
 # [ios.info_plist] must come after every scalar [ios] key (TOML folds later
 # scalars into the sub-table).

@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "description": "Skelpo CMS Admin — native cross-platform admin client (Perry/ui) for a Skelpo CMS backend.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "main": "client/main.ts",
   "scripts": {
     "check": "perry check client/main.ts",
