@@ -61,10 +61,12 @@ make sim-install   # iOS simulator
 make device        # connected iPhone; first run: perry setup ios --development
 ```
 
-The app needs a Perry build with UI fixes that are not in a Perry release
-yet (network requests in UI apps, iOS photo picker and share sheet, Android
-backend; see CLAUDE.md, "Known Perry gaps"). Build Perry from that branch
-and point the Makefile at it:
+The app needs Perry UI fixes that are merged
+([PerryTS/perry#14799](https://github.com/PerryTS/perry/pull/14799),
+[#15447](https://github.com/PerryTS/perry/pull/15447)) but newer than the
+latest Perry release (network requests in UI apps, iOS photo picker and
+share sheet, Android backend; see CLAUDE.md, "Known Perry gaps"). Until a
+release includes them, build Perry from `main` and point the Makefile at it:
 
 ```bash
 make PERRY_WT=/path/to/perry/target/release run
@@ -72,7 +74,7 @@ make PERRY_WT=/path/to/perry/target/release run
 
 By default the Makefile and scripts expect the Perry checkout at
 `../perry/worktrees/ui-ios-fixes`. `.cargo/config.toml` points the
-markdown editor's native crate at the same checkout. Until the fixes ship,
+markdown editor's native crate at the same checkout. Until a Perry release has the fixes,
 `perry publish` (which builds on Perry Hub) produces an app whose requests
 hang.
 

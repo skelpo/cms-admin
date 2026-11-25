@@ -156,7 +156,7 @@ def metadata():
     else:
         call("POST", "/v1/appStoreReviewDetails", body={"data": {"type": "appStoreReviewDetails", "attributes": attrs,
              "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": v["id"]}}}}})
-    print("copyright + review notes ok (contact + demo account: fill in App Store Connect)")
+    print("copyright + review notes ok (needs the review contact set first; demo account not in metadata.json)")
 
 def upload_screenshot(set_id, path):
     data = open(path, "rb").read()
