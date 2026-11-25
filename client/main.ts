@@ -50,7 +50,7 @@ import {
   widgetSetWidth,
 } from "perry/ui";
 import type { Widget } from "perry/ui";
-import { getAppVersion, getDeviceIdiom, getSafeAreaInsets, imagePickerPick, openURL, preferencesGet, shareUrl } from "perry/system";
+import { getAppVersion, getSafeAreaInsets, imagePickerPick, openURL, preferencesGet, shareUrl } from "perry/system";
 import {
   Format,
   destroyEditor,
@@ -161,6 +161,8 @@ import {
   isIOS,
   isAndroid,
   isDesktop,
+  isPad,
+  isWide,
   hoverTint,
   centeredLabel,
   isMobile,
@@ -189,14 +191,13 @@ import {
 } from "./ui.js";
 import type { Rgba } from "./ui.js";
 
-const isPad = getDeviceIdiom() === "pad";
-
 // Development hooks for driving the simulator from the command line, read
 // from user defaults (`xcrun simctl spawn booted defaults write
 // com.skelpo.cmsadmin SKELPO_DEV_URL http://…`). Never set in production.
 // SKELPO_DEV_URL/_EMAIL/_PASSWORD sign in; _TAB opens a tab (0–4); _TYPE
 // opens a content type by slug; _EDIT=1 then opens its first item; _HOST
-// shows a local server under a public name (screenshots).
+// shows a local server under a public name (screenshots); _ACTION=upload|share
+// opens the photo picker or share sheet.
 // (Not process.env: building that object aborts the Perry runtime on iOS
 // when the environment is large.)
 function devEnv(key: string): string {
@@ -205,9 +206,9 @@ function devEnv(key: string): string {
   return typeof v === "string" ? v : "";
 }
 /** Horizontal page margin. */
-const GUTTER = isDesktop ? 32 : PAD;
+const GUTTER = isWide ? 32 : PAD;
 /** Height of primary action buttons (bottom bar on phones, toolbar on desktop). */
-const AB_H = isDesktop ? 34 : 50;
+const AB_H = isDesktop ? 34 : isPad ? 44 : 50;
 
 // ---------- formatting helpers ------------------------------------------
 
@@ -508,7 +509,7 @@ bg(header, SURFACE);
 const headerRule = divider(0);
 
 const noticeWrap = column(0);
-setPadding(noticeWrap, 10, isDesktop ? 32 : PAD, 0, isDesktop ? 32 : PAD);
+setPadding(noticeWrap, 10, isWide ? 32 : PAD, 0, isWide ? 32 : PAD);
 
 const content = column(14);
 const scroll = ScrollView();
@@ -545,7 +546,7 @@ const sideRule = VStack(0, []);
 widgetSetWidth(sideRule, 1);
 bg(sideRule, HAIRLINE);
 let root: Widget;
-if (isDesktop) {
+if (isWide) {
   const mainCol = VStack(0, [header, headerRule, noticeWrap, scroll]);
   widgetMatchParentWidth(header);
   widgetMatchParentWidth(headerRule);
@@ -554,7 +555,7 @@ if (isDesktop) {
   stackSetDetachesHidden(mainCol, 1);
   widgetSetHugging(mainCol, 1);
   root = HStack(0, [sidebar, sideRule, mainCol]);
-  widgetSetWidth(sidebar, 240);
+  widgetSetWidth(sidebar, isPad ? 290 : 240);
   widgetMatchParentHeight(sidebar);
   widgetMatchParentHeight(sideRule);
   widgetMatchParentHeight(mainCol);
@@ -722,11 +723,13 @@ function navRoot(route: string): void {
 
 function sideItem(icon: string, label: string, route: string, badgeCount: number): Widget {
   const on = (navStack[0] ?? "") === route;
-  const r = hrow(10);
-  setPadding(r, 7, 10, 7, 10);
-  setCornerRadius(r, 8);
-  put(r, symbol(icon, 16, on ? BRAND_INK : MUTED));
-  put(r, grow(text(label, 14, on ? 600 : 500, on ? INK : BODY, 1)));
+  const r = hrow(isPad ? 12 : 10);
+  // iPad: 44 pt rows (touch); desktop: compact pointer rows.
+  if (isPad) setPadding(r, 11, 12, 11, 12);
+  else setPadding(r, 7, 10, 7, 10);
+  setCornerRadius(r, isPad ? 10 : 8);
+  put(r, symbol(icon, isPad ? 19 : 16, on ? BRAND_INK : MUTED));
+  put(r, grow(text(label, isPad ? 17 : 14, on ? 600 : 500, on ? INK : BODY, 1)));
   if (badgeCount > 0) put(r, pill(String(badgeCount), K_DANGER));
   const rest: Rgba = on ? SURFACE3 : [0, 0, 0, 0];
   bg(r, rest);
@@ -735,8 +738,8 @@ function sideItem(icon: string, label: string, route: string, badgeCount: number
   return r;
 }
 function sideLabel(t: string): Widget {
-  const box = HStack(0, [text(t.toUpperCase(), 11, 600, FAINT, 1)]);
-  setPadding(box, 16, 10, 4, 10);
+  const box = HStack(0, [text(t.toUpperCase(), isPad ? 12 : 11, 600, FAINT, 1)]);
+  setPadding(box, isPad ? 20 : 16, isPad ? 12 : 10, isPad ? 6 : 4, 10);
   return box;
 }
 
@@ -763,10 +766,10 @@ function paintSidebar(): void {
   widgetClearChildren(sidebar);
   const brand = hrow(10);
   setPadding(brand, 4, 8, 14, 8);
-  put(brand, logoMark(32));
+  put(brand, logoMark(isPad ? 38 : 32));
   const bt = column(0);
-  put(bt, text(siteName(api.getBaseUrl()), 14, 700, INK, 1));
-  put(bt, text("Skelpo CMS", 12, 500, MUTED, 1));
+  put(bt, text(siteName(api.getBaseUrl()), isPad ? 17 : 14, 700, INK, 1));
+  put(bt, text("Skelpo CMS", isPad ? 14 : 12, 500, MUTED, 1));
   put(brand, grow(bt));
   put(brand, symbol("chevron.up.chevron.down", 12, FAINT));
   setCornerRadius(brand, 10);
@@ -805,10 +808,10 @@ function paintSidebar(): void {
     const u = hrow(10);
     setPadding(u, 8, 8, 8, 8);
     setCornerRadius(u, 10);
-    put(u, avatar(who.user.displayName, who.user.email, 30));
+    put(u, avatar(who.user.displayName, who.user.email, isPad ? 36 : 30));
     const ut = column(0);
-    put(ut, text(who.user.displayName, 13, 600, INK, 1));
-    put(ut, text(who.user.role.label, 12, 400, MUTED, 1));
+    put(ut, text(who.user.displayName, isPad ? 15 : 13, 600, INK, 1));
+    put(ut, text(who.user.role.label, isPad ? 13 : 12, 400, MUTED, 1));
     put(u, grow(ut));
     const rest: Rgba = (navStack[0] ?? "") === R_ACCOUNT ? SURFACE3 : [0, 0, 0, 0];
     bg(u, rest);
@@ -849,7 +852,7 @@ function setDesktopHeader(eyebrow: string, title: string, trailing: Widget[]): v
   setPadding(header, 18, 32, 16, 28);
   const r = hrow(14);
   if (navStack.length > 1) {
-    const back = softTile("chevron.left", INK, SURFACE2, 34, true);
+    const back = softTile("chevron.left", INK, SURFACE2, isPad ? 40 : 34, true);
     onTap(back, () => goBack());
     put(r, back);
   }
@@ -863,8 +866,8 @@ function setDesktopHeader(eyebrow: string, title: string, trailing: Widget[]): v
     }
     crumb = parts.join("  ›  ");
   }
-  if (crumb.length > 0) put(texts, text(crumb, 13, 500, MUTED, 1));
-  put(texts, text(title, navStack.length > 1 ? 22 : 26, 700, INK, 1));
+  if (crumb.length > 0) put(texts, text(crumb, isPad ? 15 : 13, 500, MUTED, 1));
+  put(texts, text(title, navStack.length > 1 ? (isPad ? 26 : 22) : isPad ? 32 : 26, 700, INK, 1));
   put(r, grow(texts));
   put(r, Spacer());
   const right = hrow(8);
@@ -879,7 +882,7 @@ function setDesktopHeader(eyebrow: string, title: string, trailing: Widget[]): v
 }
 
 function setLargeHeader(eyebrow: string, title: string, trailing: Widget[], onTitleTap: (() => void) | null = null): void {
-  if (isDesktop) {
+  if (isWide) {
     setDesktopHeader(eyebrow, title, trailing);
     return;
   }
@@ -907,7 +910,7 @@ function setLargeHeader(eyebrow: string, title: string, trailing: Widget[], onTi
 
 /** Pushed-screen header: back button, centred title, trailing actions. */
 function setBarHeader(title: string, trailing: Widget[]): void {
-  if (isDesktop) {
+  if (isWide) {
     setDesktopHeader("", title, trailing);
     return;
   }
@@ -951,7 +954,7 @@ function headerIcon(name: string, run: () => void): Widget {
 }
 /** Header action: an icon on phones, a labelled button on desktop. */
 function headerAction(icon: string, label: string, run: () => void): Widget {
-  if (isDesktop) return chipButton(label, icon, B_SECONDARY, run);
+  if (isWide) return chipButton(label, icon, B_SECONDARY, run);
   return iconButton(icon, BRAND_INK, run);
 }
 /** Round tinted icon for large headers (Shopify-style). */
@@ -963,7 +966,7 @@ function circleAction(name: string, run: () => void): Widget {
 
 /** Replace the tab bar with a bar of buttons (editor, forms). */
 function setActions(buttons: Widget[]): void {
-  if (isDesktop) {
+  if (isWide) {
     const right = headerRight;
     if (!right) return;
     for (let i = 0; i < buttons.length; i++) {
@@ -995,7 +998,7 @@ function render(reload: boolean): void {
   const route = currentRoute();
   setNotice("", 0);
   widgetClearChildren(content);
-  setPadding(content, isDesktop ? 24 : 14, GUTTER, isDesktop ? 48 : 36, GUTTER);
+  setPadding(content, isWide ? 24 : 14, GUTTER, isWide ? 48 : 36, GUTTER);
   scrollviewSetOffset(scroll, 0, 0);
   const signedOut = route === R_SIGNIN;
   headerRight = null;
@@ -1003,8 +1006,8 @@ function render(reload: boolean): void {
   widgetSetHidden(header, signedOut ? 1 : 0);
   widgetSetHidden(headerRule, signedOut ? 1 : 0);
   widgetSetHidden(actionBar, 1);
-  const writing = route === R_WRITE && !isDesktop;
-  if (isDesktop) {
+  const writing = route === R_WRITE && !isWide;
+  if (isWide) {
     widgetSetHidden(sidebar, signedOut ? 1 : 0);
     widgetSetHidden(sideRule, signedOut ? 1 : 0);
     if (!signedOut) paintSidebar();
@@ -1058,9 +1061,9 @@ let signInBusy = false;
 let signInMessage = "";
 
 function screenSignIn(): void {
-  setPadding(content, isDesktop ? 72 : 0, 0, 40, 0);
+  setPadding(content, isWide ? 72 : 0, 0, 40, 0);
   const hero = column(0);
-  if (isDesktop) widgetSetHidden(hero, 1);
+  if (isWide) widgetSetHidden(hero, 1);
   // Vertical gradient (direction < 0.5) so its top matches the status-bar strip.
   widgetSetBackgroundGradient(hero, BRAND[0], BRAND[1], BRAND[2], 1, BRAND_DEEP[0], BRAND_DEEP[1], BRAND_DEEP[2], 1, 0);
   setPadding(hero, 28, 24, 30, 24);
@@ -1070,12 +1073,12 @@ function screenSignIn(): void {
   put(hero, t);
   put(hero, gap(6));
   add(hero, text(tr("Your website in your pocket. Edit pages, photos and messages from anywhere."), 16, 400, [1, 1, 1, 0.9], 0));
-  if (!isDesktop) add(content, hero);
+  if (!isWide) add(content, hero);
 
   const body = column(10);
   setPadding(body, 6, PAD, 0, PAD);
-  if (isDesktop) {
-    // Desktop: a centred card, Shopify-admin style.
+  if (isWide) {
+    // Desktop and iPad: a centred card, Shopify-admin style.
     const brand = centerColumn(10);
     put(brand, logoMark(60));
     put(brand, gap(4));
@@ -1161,7 +1164,7 @@ function screenSignIn(): void {
   setPadding(noteBox, 8, 20, 0, 20);
   widgetMatchParentWidth(note);
   add(body, noteBox);
-  if (isDesktop) {
+  if (isWide) {
     const wrap = centerColumn(0);
     put(wrap, fixed(body, 460, 0));
     add(content, wrap);
@@ -1202,7 +1205,6 @@ async function doSignIn(): Promise<void> {
     haptic("success");
     await startSession();
   } catch (e) {
-    console.log("[dbg] signIn threw " + String(e) + " " + String(e instanceof Error ? e.stack : "")); // TEMP
     signInBusy = false;
     if (api.isTotpRequired(e)) {
       const wasAsking = signInNeedsTotp;
@@ -1282,6 +1284,11 @@ async function startSession(): Promise<void> {
 async function devNavigate(): Promise<void> {
   const tab = devEnv("SKELPO_DEV_TAB");
   if (tab.length > 0) switchTab(Number(tab));
+  // _ACTION=upload opens the photo picker, _ACTION=share the share sheet
+  // (checks the native pickers without a UI driver).
+  const action = devEnv("SKELPO_DEV_ACTION");
+  if (action === "upload") setTimeout(() => startUpload(), 1500);
+  else if (action === "share") setTimeout(() => shareUrl(api.getBaseUrl(), siteName(api.getBaseUrl())), 1500);
   const typeSlug = devEnv("SKELPO_DEV_TYPE");
   if (typeSlug.length === 0) return;
   try {
@@ -1634,7 +1641,7 @@ function screenHome(seq: number, reload: boolean): void {
   const who = me;
   const name = who ? firstName(who.user.displayName) : "";
   const trailing: Widget[] = [];
-  if (who && !isDesktop) {
+  if (who && !isWide) {
     const av = avatar(who.user.displayName, who.user.email, 38);
     onTap(av, () => go(R_ACCOUNT));
     trailing.push(av);
@@ -1736,7 +1743,7 @@ async function loadHome(seq: number): Promise<void> {
   hJobsBad = 0;
   if (stats) hJobsBad = (stats["failed"] ?? 0) + (stats["dead"] ?? 0);
   homeLoaded = true;
-  if (isDesktop && me) paintSidebar(); // failed-jobs badge
+  if (isWide && me) paintSidebar(); // failed-jobs badge
   if (!isCurrent(seq)) return;
   widgetClearChildren(content);
   drawHome();
@@ -1782,7 +1789,7 @@ function homeHero(loading: boolean): Widget {
       setNotice(tr("Link copied"), 2);
     } else shareUrl(api.getBaseUrl(), siteName(api.getBaseUrl()));
   });
-  if (isDesktop) {
+  if (isWide) {
     const r = hrow(10);
     widgetSetHugging(visit, 750);
     widgetSetHugging(share, 750);
@@ -1811,9 +1818,13 @@ function tileGrid(tiles: Widget[], cols: number, spacing: number): Widget {
   return v;
 }
 function statsGrid(tiles: Widget[]): Widget {
-  return tileGrid(tiles, isDesktop ? 4 : 2, isDesktop ? 16 : 12);
+  return tileGrid(tiles, isWide ? 4 : 2, isWide ? 16 : 12);
 }
-/** Two columns on desktop (main grows, side is fixed); stacked on phones. */
+/**
+ * Two columns on desktop (main grows, side is fixed); stacked on phones and
+ * iPad, where a fixed side column would squeeze the main one (an iPad
+ * portrait window has ~700 pt next to the sidebar, less in Split View).
+ */
 function twoColumns(main: Widget, side: Widget, sideWidth: number): Widget {
   if (!isDesktop) {
     const v = column(14);
@@ -2050,7 +2061,7 @@ function screenContent(seq: number, reload: boolean): void {
     };
     localeSeg = labels.length <= 5 ? segmented(labels, at, onPick) : chips(labels, [at], false, (sel: number[]) => onPick(sel[0] ?? 0));
   }
-  if (isDesktop) {
+  if (isWide) {
     // One toolbar row: search | status | language.
     const bar = hrow(12);
     put(bar, grow(search));
@@ -2700,7 +2711,7 @@ function markdownField(name: string, title: string, help: string): Widget {
   const words = caption(wordsLine(wordCount(ed)));
   mdWordLabels[name] = words;
 
-  if (isDesktop) {
+  if (isWide) {
     const box = column(0);
     bg(box, SURFACE2);
     setCornerRadius(box, 12);
@@ -3127,12 +3138,12 @@ function screenMedia(seq: number, reload: boolean): void {
   const picking = pickField.length > 0 && navStack.length > 1;
   const allowUpload = can("manageMedia");
   if (picking) setBarHeader(tr("Choose image"), allowUpload ? [headerAction("plus", tr("Upload"), () => startUpload())] : []);
-  else setLargeHeader("", tr("Media"), allowUpload ? [isDesktop ? chipButton(tr("Upload"), "arrow.up.circle", B_PRIMARY, () => startUpload()) : circleAction("plus", () => startUpload())] : []);
+  else setLargeHeader("", tr("Media"), allowUpload ? [isWide ? chipButton(tr("Upload"), "arrow.up.circle", B_PRIMARY, () => startUpload()) : circleAction("plus", () => startUpload())] : []);
   add(
     content,
     searchField(tr("Search files"), mediaFilter, (s: string) => {
       mediaFilter = s;
-      mediaShown = isDesktop ? 48 : 36;
+      mediaShown = isWide ? 48 : 36;
       drawMediaGrid(picking);
     }),
   );
@@ -3210,7 +3221,7 @@ function drawMediaGrid(picking: boolean): void {
       );
     return;
   }
-  const cols = isDesktop ? 6 : isPad ? 5 : 3;
+  const cols = isDesktop ? 6 : isPad ? 4 : 3;
   const h = isDesktop ? 150 : isPad ? 170 : 116;
   const shown = Math.min(list.length, mediaShown);
   const grid = column(6);
@@ -3233,7 +3244,7 @@ function drawMediaGrid(picking: boolean): void {
     add(
       box,
       button(tr("Show more ({n})", { n: list.length - shown }), "", B_TINTED, 44, () => {
-        mediaShown += isDesktop ? 48 : 36;
+        mediaShown += isWide ? 48 : 36;
         drawMediaGrid(picking);
       }),
     );
@@ -3572,7 +3583,7 @@ function screenInbox(seq: number, reload: boolean): void {
     inboxSpam = i === 1;
     reloadInbox();
   });
-  if (isDesktop) {
+  if (isWide) {
     const r = hrow(0);
     widgetSetWidth(seg, 260);
     put(r, seg);

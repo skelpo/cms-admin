@@ -22,7 +22,7 @@ out_dir = "dist"
 [ios]
 bundle_id = "com.skelpo.cmsadmin"
 deployment_target = "17.0"
-device_family = ["iphone"]
+device_family = ["iphone", "ipad"]
 orientations = ["portrait", "landscape-left", "landscape-right"]
 distribute = "testflight"
 encryption_exempt = true

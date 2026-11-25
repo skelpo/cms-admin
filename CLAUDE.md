@@ -36,14 +36,19 @@ assets/icon.png          1024px app icon (Skelpo S on orange)
 
 ## UI architecture (main.ts + ui.ts)
 
-- Two shells from one source (`isDesktop` = not iOS/Android):
-  - **Phone:** header (large title on tab roots, back bar on pushed screens)
+- Two shells from one source. `isWide` (= `isDesktop || isPad`) picks the
+  layout; `isDesktop` (not iOS/Android) is only for pointer/keyboard/clipboard
+  things (hover, "Copy link"); `isPad` adds touch sizes to the wide shell.
+  - **Phone (iPhone, Android):** header (large title on tab roots, back bar on pushed screens)
     + notice banner + one `ScrollView` + bottom action bar (editor/forms) +
     5-tab bar (Home / Content / Media / Inbox / More).
-  - **Desktop:** 240 px sidebar (site switcher, sections, user) | main column
-    with a toolbar header (back + breadcrumb + title + labelled action
-    buttons). Screen actions go into the toolbar, not a bottom bar. Wider
-    grids, two-column Home and editor, hover states, ⌘S/⌘N/⌘R/⌘[/⌘1–4/⌘,.
+  - **Wide (macOS, iPad):** sidebar (240 px; 290 px with 44 pt rows on iPad)
+    (site switcher, sections, user) | main column with a toolbar header
+    (back + breadcrumb + title + labelled action buttons). Screen actions go
+    into the toolbar, not a bottom bar. Wider grids, inline Markdown editor
+    (no Write screen); two-column Home and editor on desktop only (iPad
+    stacks them: no window-size API, and Split View can be narrow). Desktop adds hover
+    states and ⌘S/⌘N/⌘R/⌘[/⌘1–4/⌘,.
 - Each navigation calls `render()`, which `widgetClearChildren(content)` and
   rebuilds the screen imperatively. Back restores the scroll offset.
 - Success messages use the native toast (`showToast`) + haptics; errors and
@@ -136,6 +141,12 @@ local change in the worktree, and the simulator keychain entitlement.
 - iOS `Image(url)` refetched and full-size-decoded every image on the main
   thread on every redraw. Patched locally in `perry-ui-ios/src/widgets/image.rs`:
   NSCache by URL + background decode downscaled to 1400 px.
+- iOS `imagePickerPick` and `shareUrl`/`shareText` were stubs (picker
+  returned `[]`, share only logged). Implemented locally:
+  `perry-ui-ios/src/image_picker.rs` (PHPickerViewController, PhotosUI loaded
+  with dlopen because the compiler doesn't link it; HEIC etc. arrive as JPEG
+  copies in tmp/perry-picks) and `perry-ui-ios/src/share.rs`
+  (UIActivityViewController, popover-anchored on iPad).
 - iOS `alertWithButtons` now styles "Cancel" as cancel and Delete/Remove/
   Discard/Archive/Sign out/Suspend as destructive (`perry-ui-ios/src/widgets/alert.rs`).
 - `TextArea` used Menlo + a bezel on macOS and 14 pt on iOS; patched to the
@@ -216,7 +227,8 @@ http://127.0.0.1:3137` (+ `_EMAIL`, `_PASSWORD`, `_TAB` 0–4, `_TYPE` slug,
 `_EDIT` 1, `_WRITE` body), and `xcrun simctl io booted screenshot x.png`.
 
 App Store screenshots: `scripts/screenshots.sh` (en-US + de-DE, 6.9" "Shots
-iPhone 6.9" simulator, status bar 9:41) → `appstore/screenshots/`, then
+iPhone 6.9" simulator, status bar 9:41; `DEVICE="Shots iPad 13"` for the
+13" iPad set) → `appstore/screenshots/`, then
 `python3 scripts/asc.py screenshots appstore/screenshots`.
 
 Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
@@ -231,13 +243,18 @@ Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
   #14799. It post-processes Perry's bundle: actool icon (Assets.car), privacy
   manifest (`assets/ios/PrivacyInfo.xcprivacy`), CFBundleName, build number,
   drops Perry's template camera/mic usage strings (another app's wording),
-  iPhone-only (UIDeviceFamily 1; iPad can be added later, never removed),
-  portrait, en/de localizations, then signs with Apple Distribution + the App Store
+  iPhone + iPad (UIDeviceFamily 1, 2; iPad support can never be removed
+  from a shipped app), iPhone portrait / iPad all four orientations (iPadOS
+  multitasking needs them), en/de localizations, then signs with Apple Distribution + the App Store
   profile and uploads with `altool --apiKey`.
 - Listing text, categories, age rating, copyright and review notes:
   `appstore/metadata.json` → `python3 scripts/asc.py metadata`. Not settable by
   API (do it in the web UI): App Privacy ("Data Not Collected"), price and
-  availability, review contact and the demo account.
+  availability, review contact and the demo account. The review-notes PATCH
+  fails (409) until the review contact is filled in.
+- Demo account for App Review: https://demo.skelpo.com, its own Skelpo CMS
+  instance on webserver.skelpo.net (see appstore/demo/README.md for the
+  setup and how to reset its content).
 - The Perry compiler must link LLVM 22 (`LLVM_SYS_221_PREFIX=/opt/homebrew/opt/llvm@22`);
   Homebrew's `llvm` is 23, which rejects Perry's iOS `Os` level.
 - The Makefile now points at the `ui-ios-fixes` worktree (the #14799 branch);

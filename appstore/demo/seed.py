@@ -4,27 +4,34 @@
   python3 appstore/demo/seed.py en   # http://127.0.0.1:3144, English site
   python3 appstore/demo/seed.py de   # http://127.0.0.1:3145, German site
 
+Another instance (e.g. demo.skelpo.com, see README.md): SEED_BASE (API URL),
+SEED_PASSWORD, SEED_SQL (command that runs SQL from stdin against the site's
+database) and SEED_RESET_UPLOADS (shell command that empties its media dir).
+
 A fictional outdoor-tour company ("Northwind Tours" / "Nordwind Touren"):
 a "tour" collection, pages, blog posts, drafts and items in review, ~40
 photos (appstore/demo/photos, Unsplash-licensed via picsum.photos) and a
 booking form with messages spread over the last two weeks. Re-running wipes
 the site's content, media and messages first. See appstore/demo/README.md.
 """
-import datetime, json, os, subprocess, sys, uuid, urllib.request
+import datetime, json, os, shlex, subprocess, sys, uuid, urllib.request
 
 LANG = sys.argv[1] if len(sys.argv) > 1 else "en"
 PORT = {"en": 3144, "de": 3145}[LANG]
 DB = f"skelpo_demo_{LANG}"
-BASE = f"http://127.0.0.1:{PORT}/api/v1"
+BASE = os.environ.get("SEED_BASE", f"http://127.0.0.1:{PORT}/api/v1")
 EMAIL = {"en": "emma@demo.skelpo.com", "de": "lena@demo.skelpo.com"}[LANG]
-PASSWORD = "northwind-demo-2026"
+PASSWORD = os.environ.get("SEED_PASSWORD", "northwind-demo-2026")
 PHOTOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "photos")
 E = LANG == "en"
 token = ""
 
 
 def sql(q):
-    subprocess.run(["mysql", "-h127.0.0.1", "-uroot", DB, "-e", q], check=True)
+    if os.environ.get("SEED_SQL"):
+        subprocess.run(shlex.split(os.environ["SEED_SQL"]), input=q.encode(), check=True)
+    else:
+        subprocess.run(["mysql", "-h127.0.0.1", "-uroot", DB, "-e", q], check=True)
 
 
 def call(method, path, body=None, raw=None, ctype="application/json"):
@@ -300,8 +307,11 @@ def main():
     for t in ("formSubmissions", "contentRelations", "contentRevisions", "content", "media", "jobs", "auditLog"):
         sql(f"DELETE FROM `{t}`")
     sql("DELETE FROM contentTypes WHERE slug = 'tour'")
-    upl = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"uploads-{LANG}")
-    subprocess.run(["rm", "-rf", upl]); os.makedirs(upl, exist_ok=True)
+    if os.environ.get("SEED_RESET_UPLOADS"):
+        subprocess.run(os.environ["SEED_RESET_UPLOADS"], shell=True, check=True)
+    else:
+        upl = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"uploads-{LANG}")
+        subprocess.run(["rm", "-rf", upl]); os.makedirs(upl, exist_ok=True)
 
     token = call("POST", "/auth/login", {"email": EMAIL, "password": PASSWORD})["data"]["token"]
     call("PUT", "/settings/site.locales", {"value": [LANG]})

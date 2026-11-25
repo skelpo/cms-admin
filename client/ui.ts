@@ -52,7 +52,7 @@ import {
   widgetSetWidth,
 } from "perry/ui";
 import type { Widget } from "perry/ui";
-import { hapticPlay, isDarkMode } from "perry/system";
+import { getDeviceIdiom, hapticPlay, isDarkMode } from "perry/system";
 import { tr } from "./i18n.js";
 
 /** Compile-time platform id: 0 macOS, 1 iOS, 2 Android, 3 Windows, 4 Linux. */
@@ -60,8 +60,15 @@ declare const __platform__: number;
 export const isIOS = __platform__ === 1;
 export const isAndroid = __platform__ === 2;
 export const isMobile = isIOS || isAndroid;
-/** Desktop layout: sidebar, toolbar actions, hover states, wider grids. */
+/** macOS/Windows/Linux: pointer, hover states, keyboard, clipboard. */
 export const isDesktop = !isMobile;
+/** iPad: wide layout with touch-sized controls. */
+export const isPad = isIOS && getDeviceIdiom() === "pad";
+/**
+ * Wide layout: sidebar, toolbar actions, two-column screens, wider grids.
+ * Desktop and iPad; iPad keeps touch sizes (see `isPad`).
+ */
+export const isWide = isDesktop || isPad;
 
 // ---------- colour -------------------------------------------------------
 
@@ -615,7 +622,7 @@ export function button(label: string, icon: string, variant: number, height: num
 }
 /** A button that hugs its content (for rows of actions). */
 export function chipButton(label: string, icon: string, variant: number, run: () => void): Widget {
-  const b = button(label, icon, variant, 36, run);
+  const b = button(label, icon, variant, isPad ? 40 : 36, run);
   widgetSetHugging(b, 750);
   return b;
 }
@@ -631,8 +638,11 @@ export function iconButton(name: string, c: Rgba, run: () => void): Widget {
  * "H2" when `icon` is empty.
  */
 export function toolButton(icon: string, label: string, c: Rgba, run: () => void): Widget {
-  const inner = icon.length > 0 ? symbol(icon, 15, c) : text(label, 13, 700, c, 1);
-  const box = centerBox(inner, 32, 30, icon.length > 0 ? 15 : lineH(13));
+  // iPad: 40 pt targets for fingers; desktop: compact.
+  const is = isPad ? 18 : 15;
+  const ts = isPad ? 15 : 13;
+  const inner = icon.length > 0 ? symbol(icon, is, c) : text(label, ts, 700, c, 1);
+  const box = centerBox(inner, isPad ? 40 : 32, isPad ? 40 : 30, icon.length > 0 ? is : lineH(ts));
   setCornerRadius(box, 7);
   onTap(box, run);
   hoverTint(box, [0, 0, 0, 0]);
@@ -726,7 +736,7 @@ export function chips(labels: string[], selected: number[], multi: boolean, onCh
     const index = i;
     const s = labels[i] ?? "";
     const width = s.length * 7.6 + 34 + (multi ? 14 : 0);
-    if (used > 0 && used + width > (isDesktop ? 900 : 340)) {
+    if (used > 0 && used + width > (isDesktop ? 900 : isPad ? 560 : 340)) {
       put(row, Spacer());
       add(rows, row);
       row = HStack(8, []);

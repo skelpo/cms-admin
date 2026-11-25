@@ -3,10 +3,14 @@
 #
 #   scripts/screenshots.sh            build the sim app, shoot every screen in en + de
 #   NO_BUILD=1 scripts/screenshots.sh reuse build/client-ios.app
+#   DEVICE="Shots iPad 13" NO_BUILD=1 scripts/screenshots.sh   the iPad set
 #
-# Output: appstore/screenshots/<locale>/APP_IPHONE_67/NN-name.png (1320×2868,
-# iPhone 17 Pro Max = the 6.9" display App Store Connect requires), ready for
-# `python3 scripts/asc.py screenshots appstore/screenshots`.
+# Output: appstore/screenshots/<locale>/<display>/NN-name.png, ready for
+# `python3 scripts/asc.py screenshots appstore/screenshots`:
+#   "Shots iPhone 6.9" (iPhone 17 Pro Max, 1320×2868)  → APP_IPHONE_67
+#   "Shots iPad 13"    (iPad Pro 13" M5, 2064×2752)    → APP_IPAD_PRO_3GEN_129
+# Those are the two sizes App Store Connect requires; it scales them down
+# for smaller devices.
 #
 # Content comes from two local demo CMS instances (English on :3144, German on
 # :3145) filled by appstore/demo/seed.py; see appstore/demo/README.md. The app
@@ -25,6 +29,7 @@ FIELD="${FIELD:-body}"      # its Markdown field for the Write shot
 WAIT="${WAIT:-9}"           # seconds for sign-in + data to load
 BUNDLE=com.skelpo.cmsadmin
 OUT=appstore/screenshots
+if [[ "$DEVICE" == *iPad* ]]; then DISPLAY_TYPE=APP_IPAD_PRO_3GEN_129; else DISPLAY_TYPE=APP_IPHONE_67; fi
 
 UDID=$(xcrun simctl list devices -j | python3 -c "
 import json,sys
@@ -52,7 +57,7 @@ shot() {
   else site=http://127.0.0.1:3144 email=emma@demo.skelpo.com; fi
   [[ -z "${ONLY:-}" || "$name" == *"$ONLY"* ]] || return 0   # ONLY=home: just that screen
   xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
-  for k in TAB TYPE EDIT WRITE FOCUS; do defs delete "$BUNDLE" "SKELPO_DEV_$k" 2>/dev/null || true; done
+  for k in TAB TYPE EDIT WRITE FOCUS ACTION; do defs delete "$BUNDLE" "SKELPO_DEV_$k" 2>/dev/null || true; done
   defs write "$BUNDLE" SKELPO_LANG "$lang"
   defs write "$BUNDLE" SKELPO_DEV_URL "$site"
   defs write "$BUNDLE" SKELPO_DEV_EMAIL "$email"
@@ -61,25 +66,26 @@ shot() {
   for kv in "$@"; do defs write "$BUNDLE" "SKELPO_DEV_${kv%%=*}" "${kv#*=}"; done
   xcrun simctl launch "$UDID" "$BUNDLE" -AppleLanguages "($lang)" -AppleLocale "${loc/-/_}" >/dev/null
   sleep "$WAIT"
-  mkdir -p "$OUT/$loc/APP_IPHONE_67"
-  xcrun simctl io "$UDID" screenshot --type=png "$OUT/$loc/APP_IPHONE_67/$name.png" >/dev/null 2>&1
+  mkdir -p "$OUT/$loc/$DISPLAY_TYPE"
+  xcrun simctl io "$UDID" screenshot --type=png "$OUT/$loc/$DISPLAY_TYPE/$name.png" >/dev/null 2>&1
   echo "  $loc/$name"
 }
 
 LOCALES="${LOCALES:-en-US de-DE}"
 for loc in $LOCALES; do
-  rm -rf "$OUT/$loc"
+  [[ -n "${ONLY:-}" ]] || rm -rf "$OUT/$loc/$DISPLAY_TYPE"
   shot "$loc" 01-home    TAB=0
   shot "$loc" 02-content TYPE="$TYPE"
   shot "$loc" 03-editor  TYPE="$TYPE" EDIT=1
-  shot "$loc" 04-write   TYPE="$TYPE" EDIT=1 WRITE="$FIELD"
+  # iPad edits Markdown inline in the editor, so it has no Write screen.
+  [[ $DISPLAY_TYPE == APP_IPAD_PRO_3GEN_129 ]] || shot "$loc" 04-write TYPE="$TYPE" EDIT=1 WRITE="$FIELD"
   shot "$loc" 05-media   TAB=2
   shot "$loc" 06-inbox   TAB=3
 done
 
 # Leave the simulator clean: no stored password, no forced language.
 xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
-for k in URL EMAIL PASSWORD HOST TAB TYPE EDIT WRITE FOCUS; do defs delete "$BUNDLE" "SKELPO_DEV_$k" 2>/dev/null || true; done
+for k in URL EMAIL PASSWORD HOST TAB TYPE EDIT WRITE FOCUS ACTION; do defs delete "$BUNDLE" "SKELPO_DEV_$k" 2>/dev/null || true; done
 defs delete "$BUNDLE" SKELPO_LANG 2>/dev/null || true
 xcrun simctl status_bar "$UDID" clear
 echo "==> $OUT"

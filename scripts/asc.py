@@ -149,7 +149,9 @@ def metadata():
          "attributes": {"copyright": m["copyright"]}}})
     rd = call("GET", f"/v1/appStoreVersions/{v['id']}/appStoreReviewDetail").get("data")
     attrs = {"notes": m["reviewNotes"]}
-    if rd:
+    if rd and rd["attributes"].get("notes") == m["reviewNotes"]:
+        pass  # unchanged; a PATCH would also demand the contact fields
+    elif rd:
         call("PATCH", f"/v1/appStoreReviewDetails/{rd['id']}", body={"data": {"type": "appStoreReviewDetails", "id": rd["id"], "attributes": attrs}})
     else:
         call("POST", "/v1/appStoreReviewDetails", body={"data": {"type": "appStoreReviewDetails", "attributes": attrs,
