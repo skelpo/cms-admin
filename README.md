@@ -73,7 +73,7 @@ make PERRY_WT=/path/to/perry/target/release run
 ```
 
 By default the Makefile and scripts expect the Perry checkout at
-`../perry/worktrees/ui-ios-fixes`. `.cargo/config.toml` points the
+`../perry/worktrees/app-store-fixes`. `.cargo/config.toml` points the
 markdown editor's native crate at the same checkout. Until a Perry release has the fixes,
 `perry publish` (which builds on Perry Hub) produces an app whose requests
 hang.

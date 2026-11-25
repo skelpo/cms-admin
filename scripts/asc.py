@@ -9,8 +9,13 @@ p8_key_path) so no secrets live in this repo.
   asc.py next-build        print the next free build number for VERSION
   asc.py metadata          push appstore/metadata.json (listing text in every
                            locale, categories, age rating, copyright, review notes)
-  asc.py screenshots DIR   replace the iOS screenshots from DIR/<locale>/<display>/*.png
-                           (display = APP_IPHONE_67 etc., files in upload order)
+  asc.py screenshots DIR   replace the screenshots from DIR/<locale>/<display>/*.png
+                           (display = APP_IPHONE_67, APP_DESKTOP etc., files in upload order)
+  asc.py setup-mac         mint the Mac App Store profile
+
+ASC_PLATFORM=MAC_OS makes metadata/screenshots/next-build act on the macOS
+version (default IOS). The macOS review details copy the contact and demo
+account from the iOS version.
 """
 import glob, hashlib, json, os, sys, time, tomllib, urllib.request, urllib.parse, base64
 import jwt
@@ -18,6 +23,8 @@ import jwt
 BUNDLE_ID = "com.skelpo.cmsadmin"
 APP_NAME = "Skelpo CMS"
 PROFILE_PATH = os.path.expanduser("~/.perry/com_skelpo_cmsadmin_appstore.mobileprovision")
+MAC_PROFILE_PATH = os.path.expanduser("~/.perry/com_skelpo_cmsadmin_macos.provisionprofile")
+PLATFORM = os.environ.get("ASC_PLATFORM", "IOS")
 API = "https://api.appstoreconnect.apple.com"
 
 cfg = tomllib.load(open(os.path.expanduser("~/.perry/config.toml"), "rb"))["apple"]
@@ -49,9 +56,27 @@ def bundle():
     d = call("GET", "/v1/bundleIds", {"filter[identifier]": BUNDLE_ID})["data"]
     return next((b for b in d if b["attributes"]["identifier"] == BUNDLE_ID), None)
 
-def profiles(bid):
+def profiles(bid, ptype="IOS_APP_STORE"):
     d = call("GET", f"/v1/bundleIds/{bid}/profiles")["data"]
-    return [p for p in d if p["attributes"]["profileType"] == "IOS_APP_STORE" and p["attributes"]["profileState"] == "ACTIVE"]
+    return [p for p in d if p["attributes"]["profileType"] == ptype and p["attributes"]["profileState"] == "ACTIVE"]
+
+def setup_mac():
+    b = bundle()
+    ps = profiles(b["id"], "MAC_APP_STORE")
+    if ps:
+        prof = call("GET", f'/v1/profiles/{ps[0]["id"]}')["data"]
+    else:
+        certs = [c for c in call("GET", "/v1/certificates", {"limit": 200})["data"]
+                 if c["attributes"]["certificateType"] in ("DISTRIBUTION", "MAC_APP_DISTRIBUTION")]
+        if not certs:
+            sys.exit("no Mac App Distribution certificate on the team")
+        prof = call("POST", "/v1/profiles", body={"data": {"type": "profiles",
+            "attributes": {"name": "Skelpo CMS Admin Mac App Store", "profileType": "MAC_APP_STORE"},
+            "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": b["id"]}},
+                              "certificates": {"data": [{"type": "certificates", "id": c["id"]} for c in certs]}}}})["data"]
+        print("created Mac App Store profile", prof["attributes"]["name"])
+    open(MAC_PROFILE_PATH, "wb").write(base64.b64decode(prof["attributes"]["profileContent"]))
+    print("profile saved to", MAC_PROFILE_PATH)
 
 def app():
     d = call("GET", "/v1/apps", {"filter[bundleId]": BUNDLE_ID})["data"]
@@ -104,12 +129,12 @@ def next_build(version):
     nums = [int(x["attributes"]["version"]) for x in d if x["attributes"]["version"].isdigit()]
     print(max(nums, default=0) + 1)
 
-def ios_version(a):
-    vs = call("GET", f"/v1/apps/{a['id']}/appStoreVersions", {"filter[platform]": "IOS", "limit": 10})["data"]
+def ios_version(a, platform=None):
+    vs = call("GET", f"/v1/apps/{a['id']}/appStoreVersions", {"filter[platform]": platform or PLATFORM, "limit": 10})["data"]
     editable = [v for v in vs if v["attributes"]["appStoreState"] in
                 ("PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "WAITING_FOR_REVIEW")]
     if not editable:
-        sys.exit("no editable iOS App Store version")
+        sys.exit(f"no editable {platform or PLATFORM} App Store version")
     return editable[0]
 
 def upsert(kind, parent_rel, parent_type, parent_id, existing, locale, attrs):
@@ -131,6 +156,8 @@ def metadata():
     info_locs = call("GET", f"/v1/appInfos/{info['id']}/appInfoLocalizations")["data"]
     ver_locs = call("GET", f"/v1/appStoreVersions/{v['id']}/appStoreVersionLocalizations")["data"]
     for loc, t in m["locales"].items():
+        if PLATFORM == "MAC_OS":
+            t = dict(t, **m.get("macos", {}).get(loc, {}))
         upsert("appInfoLocalizations", "appInfo", "appInfos", info["id"], info_locs, loc,
                {"name": t["name"], "subtitle": t["subtitle"], "privacyPolicyUrl": t["privacyPolicyUrl"]})
         # Adding an app-info locale creates the matching version locale.
@@ -149,7 +176,16 @@ def metadata():
          "attributes": {"copyright": m["copyright"]}}})
     rd = call("GET", f"/v1/appStoreVersions/{v['id']}/appStoreReviewDetail").get("data")
     attrs = {"notes": m["reviewNotes"]}
-    if rd and rd["attributes"].get("notes") == m["reviewNotes"]:
+    if PLATFORM != "IOS":
+        # Contact + demo account aren't in the repo; take them from the iOS version.
+        iv = call("GET", f"/v1/apps/{a['id']}/appStoreVersions", {"filter[platform]": "IOS", "limit": 1})["data"][0]
+        ird = call("GET", f"/v1/appStoreVersions/{iv['id']}/appStoreReviewDetail").get("data")
+        if ird:
+            attrs.update({k: v for k, v in ird["attributes"].items() if k.startswith(("contact", "demoAccount")) and v is not None})
+            rd_same = rd and all(rd["attributes"].get(k) == v for k, v in attrs.items())
+            if rd_same:
+                attrs = None
+    if attrs is None or (PLATFORM == "IOS" and rd and rd["attributes"].get("notes") == m["reviewNotes"]):
         pass  # unchanged; a PATCH would also demand the contact fields
     elif rd:
         call("PATCH", f"/v1/appStoreReviewDetails/{rd['id']}", body={"data": {"type": "appStoreReviewDetails", "id": rd["id"], "attributes": attrs}})
@@ -184,6 +220,8 @@ def screenshots(root):
         sets = call("GET", f"/v1/appStoreVersionLocalizations/{locs[loc]}/appScreenshotSets")["data"]
         for disp_dir in sorted(glob.glob(os.path.join(loc_dir, "*"))):
             disp = os.path.basename(disp_dir)
+            if (disp == "APP_DESKTOP") != (PLATFORM == "MAC_OS"):
+                continue  # Mac sets go to the macOS version, the rest to iOS
             files = sorted(glob.glob(os.path.join(disp_dir, "*.png")))
             if not files:
                 continue
@@ -206,4 +244,4 @@ if __name__ == "__main__":
     if cmd == "screenshots":
         screenshots(sys.argv[2])
     else:
-        {"status": status, "setup": setup, "metadata": metadata}.get(cmd, lambda: next_build(sys.argv[2]))()
+        {"status": status, "setup": setup, "setup-mac": setup_mac, "metadata": metadata}.get(cmd, lambda: next_build(sys.argv[2]))()

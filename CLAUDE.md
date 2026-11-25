@@ -255,10 +255,22 @@ Local CMS for testing: the Verrano CMS on http://127.0.0.1:3137 (see
 - Demo account for App Review: https://demo.skelpo.com, its own Skelpo CMS
   instance (appstore/demo/README.md; server notes in the gitignored
   appstore/demo/server.local.md).
+- **Mac App Store:** `scripts/mac-appstore.sh` (sandbox: network client +
+  user-selected files; Mac App Store profile from `asc.py setup-mac`;
+  `MACOSX_DEPLOYMENT_TARGET=13.0`, arm64 only; signed .pkg, altool -t macos).
+  `--sandbox-test` signs with Developer ID + sandbox to run locally.
+  Listing: `ASC_PLATFORM=MAC_OS python3 scripts/asc.py metadata` (Mac wording
+  from metadata.json `macos`); screenshots `scripts/mac-screenshots.sh` →
+  `APP_DESKTOP` (2880×1800). On macOS the dev hooks are read too; pass them
+  as launch arguments (`-SKELPO_DEV_URL …`), `defaults write` doesn't reach
+  the app reliably once a sandboxed build has run. A set SKELPO_DEV_URL
+  always signs in fresh (the Mac keychain keeps sessions across launches).
 - The Perry compiler must link LLVM 22 (`LLVM_SYS_221_PREFIX=/opt/homebrew/opt/llvm@22`);
   Homebrew's `llvm` is 23, which rejects Perry's iOS `Os` level.
-- The Makefile now points at the `ui-ios-fixes` worktree (the #14799 branch);
-  macOS, aarch64-apple-ios and aarch64-apple-ios-sim archives are built there.
+- The Makefile and scripts point at the `app-store-fixes` worktree (Perry
+  `main` with #14799 and #15447; `ui-ios-fixes` lost its `target/`). Its
+  macOS archives are built; build the aarch64-apple-ios(-sim) ones there
+  before the next iOS build.
 
 ## Adding an endpoint
 

@@ -197,11 +197,11 @@ import type { Rgba } from "./ui.js";
 // SKELPO_DEV_URL/_EMAIL/_PASSWORD sign in; _TAB opens a tab (0–4); _TYPE
 // opens a content type by slug; _EDIT=1 then opens its first item; _HOST
 // shows a local server under a public name (screenshots); _ACTION=upload|share
-// opens the photo picker or share sheet.
+// opens the photo picker or share sheet. On macOS pass them as launch
+// arguments (`client -SKELPO_DEV_URL http://…`, see scripts/mac-screenshots.sh).
 // (Not process.env: building that object aborts the Perry runtime on iOS
 // when the environment is large.)
 function devEnv(key: string): string {
-  if (!isMobile) return "";
   const v = preferencesGet(key);
   return typeof v === "string" ? v : "";
 }
@@ -1395,7 +1395,10 @@ async function boot(): Promise<void> {
   const site = store.loadActiveSite();
   inUrl = store.loadLastUrl();
   const devUrl = devEnv("SKELPO_DEV_URL");
-  if (!site && devUrl.length > 0) {
+  // Dev hook: always sign in fresh to SKELPO_DEV_URL (that sign-in also
+  // runs the _TAB/_TYPE/_EDIT navigation), even when the keychain already
+  // holds a session, as it does across launches on macOS.
+  if (devUrl.length > 0) {
     inUrl = devUrl;
     inEmail = devEnv("SKELPO_DEV_EMAIL");
     inPassword = devEnv("SKELPO_DEV_PASSWORD");

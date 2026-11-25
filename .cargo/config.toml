@@ -3,4 +3,4 @@
 # against the local Perry checkout's perry-ffi instead of fetching
 # PerryTS/perry from GitHub. Paths are relative to this file's parent.
 [patch."https://github.com/PerryTS/perry"]
-perry-ffi = { path = "../perry/worktrees/ui-ios-fixes/crates/perry-ffi" }
+perry-ffi = { path = "../perry/worktrees/app-store-fixes/crates/perry-ffi" }

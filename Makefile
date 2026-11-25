@@ -12,7 +12,7 @@ BUNDLE_ID := com.skelpo.cmsadmin
 # Pinned to the local Perry worktree that carries the fixes listed in
 # CLAUDE.md ("Known Perry gaps"); a stock `perry` on PATH builds an app whose
 # requests hang. Override with `make PERRY_WT=/path/to/target/release`.
-PERRY_WT ?= $(abspath ../perry/worktrees/ui-ios-fixes/target/release)
+PERRY_WT ?= $(abspath ../perry/worktrees/app-store-fixes/target/release)
 PERRY := PERRY_RUNTIME_DIR=$(PERRY_WT) $(PERRY_WT)/perry
 # Perry runs `cargo build` for native-library packages
 # (@skelpo/markdown-editor) from this directory; perry-ffi needs Perry's

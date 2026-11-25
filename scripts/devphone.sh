@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 BUNDLE_ID=com.skelpo.cmsadmin
 TEAM=K6UW5YV9F7
 PROFILE="$HOME/.perry/com_skelpo_cmsadmin_dev.mobileprovision"
-PERRY_WT="${PERRY_WT:-$(cd ../perry/worktrees/ui-ios-fixes/target/release && pwd)}"
+PERRY_WT="${PERRY_WT:-$(cd ../perry/worktrees/app-store-fixes/target/release && pwd)}"
 export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-10-04}"
 OUT=build/devphone
 APP="$OUT/SkelpoCMS.app"
